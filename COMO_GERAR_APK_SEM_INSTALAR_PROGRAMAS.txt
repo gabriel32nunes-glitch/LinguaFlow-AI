@@ -1,0 +1,24 @@
+LINGUAFLOW AI V0.2 - GERAR APK GRATUITAMENTE PELO NAVEGADOR
+
+ATENCAO: Este ZIP NAO E UM APK. O projeto NAO foi compilado nem testado em um Samsung.
+O Android deve ser 14 ou superior e ter reconhecimento de voz offline PT/EN compativel.
+
+O ZIP agora inclui .github/workflows/gerar-apk.yml para compilar na nuvem.
+
+COMO GERAR USANDO SOMENTE O NAVEGADOR
+
+1) Crie uma conta gratuita em https://github.com se ainda nao tiver.
+2) No GitHub, crie um repositorio publico vazio chamado linguaflow-ai-teste (NÃO inclua chaves ou arquivos pessoais).
+3) Extraia o conteudo deste ZIP no celular/computador e envie TODOS OS ARQUIVOS E PASTAS para o repositorio, inclusive a pasta OCULTA .github/workflows/gerar-apk.yml.
+   No GitHub, clique em Add file > Upload files. Se o celular nao deixar enviar pastas, faca pelo navegador no computador, sem instalar programa.
+4) Apos o envio, abra a aba Actions > Gerar APK para Samsung > Run workflow (ou veja o job automatico do push).
+5) Aguarde o job concluir com o sinal verde. Embaixo da pagina do job, baixe o artifact LinguaFlow-Samsung-APK.
+6) O download e um ZIP do GitHub. Extraia-o, encontre app-debug.apk e abra no Samsung. O Android pode pedir autorizacao para instalar apps desse navegador/gerenciador de arquivos.
+
+Se o build falhar, o APK nao sera gerado: abra os logs do job para identificar o erro.
+Nunca instale APKs de origem desconhecida; o APK aqui sera gerado na SUA conta GitHub a partir destes arquivos.
+O projeto usa ML Kit e mecanismos offline, sem API de traducao paga. Baixa modelos gratuitamente quando necessario.
+
+ALTERNATIVA: um desenvolvedor que tenha Flutter/Android SDK instalado pode executar flutter create ., python setup_android.py, flutter pub get e flutter build apk --debug.
+
+LIMITES: nao e traducao ininterrupta perfeita; o audio e pausado enquanto fala a traducao; reconhecimento automatico PT/EN pode nao ser suportado por todos os Samsung; nao funciona com a tela bloqueada nesta versao. 
