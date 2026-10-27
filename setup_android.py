@@ -21,11 +21,11 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         continue
     build = p.read_text(encoding='utf-8')
     if p.suffix == '.kts':
-        build = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35', build)
+        build = re.sub(r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 36', build)
         build = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 31', build)
         build = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35', build)
     else:
-        build = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35', build)
+        build = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', build)
         build = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 31', build)
         build = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35', build)
     # Erro explícito se o template padrão mudou (melhor que sobrescrever errado).
