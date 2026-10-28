@@ -1,10 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/widgets.dart';
 import 'package:linguaflow_ai/main.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('Modo TV seleciona ingles e evita eco por voz sintetizada', () {
     final controller = TranslationController();
-    addTearDown(controller.dispose);
     expect(controller.languageMode, 'auto');
     expect(controller.audioEnabled, isTrue);
     controller.setTvMode(true);
