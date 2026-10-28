@@ -1,0 +1,127 @@
+name: Publicar atualização assinada LinguaFlow
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versao publica X.Y.Z (exemplo 1.0.0)'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      LINGUAFLOW_KEYSTORE_PATH: ${{ github.workspace }}/android/app/linguaflow-upload.jks
+      LINGUAFLOW_KEYSTORE_PASSWORD: ${{ secrets.LINGUAFLOW_KEYSTORE_PASSWORD }}
+      LINGUAFLOW_KEY_PASSWORD: ${{ secrets.LINGUAFLOW_KEY_PASSWORD }}
+      LINGUAFLOW_KEY_ALIAS: ${{ secrets.LINGUAFLOW_KEY_ALIAS }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.LINGUAFLOW_KEYSTORE_BASE64 }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Verificar versao e configuracao de assinatura
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Versao invalida. Use 1.0.0" && exit 1
+          fi
+          for secret in ANDROID_KEYSTORE_BASE64 LINGUAFLOW_KEYSTORE_PASSWORD LINGUAFLOW_KEY_PASSWORD LINGUAFLOW_KEY_ALIAS; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::Falta configurar $secret em Settings > Secrets and variables > Actions"
+              exit 1
+            fi
+          done
+          echo "BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Obter codigo
+        uses: actions/checkout@v4
+
+      - name: Validar se a tag ja existe
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${RELEASE_VERSION}+${BUILD_NUMBER}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Essa tag ja esta publicada."
+            exit 1
+          fi
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Incluir modelo Whisper verificado
+        run: |
+          mkdir -p assets/models
+          curl -fL --retry 3 --connect-timeout 20 --max-time 300 \
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/f281eb45af861ab5e5297d23694b7d46e090c02c/ggml-tiny-q5_1.bin' \
+            -o assets/models/ggml-tiny-q5_1.bin
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  assets/models/ggml-tiny-q5_1.bin' | sha256sum -c -
+
+      - name: Preparar projeto e assinatura permanente
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create . --platforms android
+          mkdir -p android/app
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$LINGUAFLOW_KEYSTORE_PATH"
+          chmod 600 "$LINGUAFLOW_KEYSTORE_PATH"
+          test -s "$LINGUAFLOW_KEYSTORE_PATH"
+          python3 setup_android.py
+          flutter pub get
+          rm -f test/widget_test.dart
+
+      - name: Testes automatizados
+        run: flutter test
+
+      - name: Preparar NDK
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install 'ndk;29.0.13113456'
+
+      - name: Compilar APK final ARM64 assinado
+        shell: bash
+        run: |
+          flutter build apk --release --target-platform android-arm64 \
+            --build-name "$RELEASE_VERSION" --build-number "$BUILD_NUMBER"
+
+      - name: Validar certificado e assinatura
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+          ls -lh "$APK"
+
+      - name: Publicar release no GitHub para atualizacao no aplicativo
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${RELEASE_VERSION}+${BUILD_NUMBER}"
+          gh release create "$TAG" \
+            'build/app/outputs/flutter-apk/app-release.apk#LinguaFlow-A14-arm64.apk' \
+            --target "$GITHUB_SHA" \
+            --title "LinguaFlow AI v$RELEASE_VERSION" \
+            --notes "APK ARM64 oficial assinado. Build $BUILD_NUMBER. Atualize por cima da versao anterior se a assinatura digital for a mesma. O Android pedira confirmacao."
+
+      - name: Remover chave temporaria
+        if: always()
+        run: rm -f "$LINGUAFLOW_KEYSTORE_PATH"
