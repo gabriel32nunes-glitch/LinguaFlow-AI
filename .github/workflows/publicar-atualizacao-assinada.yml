@@ -28,6 +28,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Publicacao oficial so e permitida na branch main validada."
+            exit 1
+          fi
           if ! [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Versao invalida. Use 1.0.0" && exit 1
           fi
@@ -108,6 +112,15 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          SIGNER=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" |
+            sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
+            tr '[:upper:]' '[:lower:]' | tr -d '\r')
+          EXPECTED="e8b0e0f513f3d0b3f38a27a2fed923cb9a7350ab5186b10ea0e100fb9a20d047"
+          if [ "$SIGNER" != "$EXPECTED" ]; then
+            echo "::error::Certificado de assinatura diferente do LinguaFlow. Publicacao cancelada."
+            exit 1
+          fi
+          echo "Certificado do LinguaFlow conferido (SHA-256 publico)."
           sha256sum "$APK"
           ls -lh "$APK"
 
