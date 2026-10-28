@@ -93,7 +93,7 @@ jobs:
         shell: bash
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --licenses < <(printf 'y\n%.0s' {1..100}) >/dev/null
           "$SDKMANAGER" --install 'ndk;29.0.13113456'
 
       - name: Compilar APK de verificacao com assinatura definitiva
