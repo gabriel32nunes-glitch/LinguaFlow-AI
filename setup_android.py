@@ -28,18 +28,18 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         build = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', build)
         build = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 31', build)
         build = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35', build)
-    # APKs oficiais: usar SEMPRE a mesma chave de assinatura armazenada
-    # somente nos GitHub Actions Secrets. Builds experimentais continuam debug.
-    # A chave real NUNCA entra neste repositorio.
+    # APKs oficiais usam a mesma chave guardada apenas em GitHub Secrets.
+    # APKs experimentais continuam com a chave debug do Flutter.
     if p.suffix == '.kts':
         if 'linguaflowRelease' not in build:
-            build = re.sub(
-                r'(    buildTypes\s*\{)',
-                '''    signingConfigs {
-        val storePath = System.getenv("LINGUAFLOW_KEYSTORE_PATH")
-        if (!storePath.isNullOrBlank()) {
+            marker = '    buildTypes {'
+            if marker not in build:
+                raise SystemExit('Nao foi encontrado buildTypes no Gradle Kotlin DSL.')
+            signing = """    signingConfigs {
+        val signingPath = System.getenv("LINGUAFLOW_KEYSTORE_PATH")
+        if (!signingPath.isNullOrBlank()) {
             create("linguaflowRelease") {
-                storeFile = file(storePath)
+                storeFile = file(signingPath)
                 storePassword = System.getenv("LINGUAFLOW_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("LINGUAFLOW_KEY_ALIAS")
                 keyPassword = System.getenv("LINGUAFLOW_KEY_PASSWORD")
@@ -47,24 +47,23 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         }
     }
 
-\\1''',
-                build, count=1,
-            )
-            build = build.replace(
-                'signingConfig = signingConfigs.getByName("debug")',
-                '''signingConfig = if (
-                System.getenv("LINGUAFLOW_KEYSTORE_PATH").isNullOrBlank()
-            ) signingConfigs.getByName("debug")
-              else signingConfigs.getByName("linguaflowRelease")''',
-            )
+"""
+            build = build.replace(marker, signing + marker, 1)
+            debug = 'signingConfig = signingConfigs.getByName("debug")'
+            if debug not in build:
+                raise SystemExit('A configuracao de assinatura do Flutter mudou.')
+            release = """signingConfig = if (
+                    System.getenv("LINGUAFLOW_KEYSTORE_PATH").isNullOrBlank()
+                ) signingConfigs.getByName("debug")
+                  else signingConfigs.getByName("linguaflowRelease")"""
+            build = build.replace(debug, release, 1)
     else:
-        # O projeto usa Kotlin DSL nos Flutter recentes.
-        # Evitar publicar um APK release com assinatura imprevisivel.
+        # Exigir Kotlin DSL ao produzir APK oficial.
         if 'LINGUAFLOW_KEYSTORE_PATH' in __import__('os').environ:
-            raise SystemExit('A assinatura estavel exige template Gradle Kotlin DSL.')
+            raise SystemExit('Assinatura estavel exige Gradle Kotlin DSL.')
 
     # Erro explícito se o template padrão mudou (melhor que sobrescrever errado).
-    if not re.search(r'(minSdk\\s*=\\s*31|minSdkVersion\\s+31)', build):
+    if not re.search(r'(minSdk\s*=\s*31|minSdkVersion\s+31)', build):
         raise SystemExit('Atenção: o template Gradle mudou. Configure manualmente minSdk 31 em ' + str(p))
     p.write_text(build, encoding='utf-8')
 
