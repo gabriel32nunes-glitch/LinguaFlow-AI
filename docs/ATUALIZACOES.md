@@ -22,6 +22,24 @@ assinatura oficial permanente **pode exigir uma única reinstalação**.
 Depois disso, as versões assinadas com a mesma chave atualizarão por cima.
 Não perca a chave oficial nem altere o applicationId!
 
+## Certificado oficial escolhido (informação pública)
+
+O kit privado foi gerado em 28/10/2026 com estas propriedades:
+
+- Alias: `linguaflow`
+- Tipo: `JKS`
+- Chave: `RSA 3072`
+- Impressão digital SHA-256 do certificado:
+  `E8:B0:E0:F5:13:F3:D0:B3:F3:8A:27:A2:FE:D9:23:CB:9A:73:50:AB:51:86:B1:0E:A0:E1:00:FB:9A:20:D0:47`
+
+Essa impressão digital **não é secreta**. O workflow interrompe a publicação
+se o APK estiver assinado com qualquer outro certificado. Isso previne
+trocas acidentais de chave entre versões.
+
+O kit privado (.jks, Base64 e senhas) foi entregue diretamente ao proprietário
+fora deste repositório. Ele **nunca deve ser adicionado aqui**. Caso ele perca
+a chave, não podemos recriá-la a partir da impressão digital pública.
+
 ## Configuração da assinatura (uma única vez)
 
 NUNCA faça commit do arquivo .jks, da senha ou da chave Base64.
