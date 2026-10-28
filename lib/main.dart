@@ -10,6 +10,7 @@ import 'work_phrases.dart';
 import 'language_direction.dart';
 import 'device_profile.dart';
 import 'voice_aura.dart';
+import 'language_library.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -83,6 +84,13 @@ class TranslationController extends ChangeNotifier {
   String deviceStatus = 'Detectando versao Android e memoria…';
   String? deviceNotice;
   final List<TranslationTurn> history = [];
+  final Map<String, PackState> languagePacks = {
+    for (final language in linguaLanguages)
+      language.code: PackState.unknown,
+  };
+  String selectedSource = 'en';
+  String selectedTarget = 'pt';
+  String packFeedback = 'Gerencie os idiomas sem abrir configuracoes do Android.';
   String modelsStatus = 'Modelos ainda não verificados';
   String status = 'Pronto para iniciar';
   String partial = '';
@@ -134,6 +142,153 @@ class TranslationController extends ChangeNotifier {
     } catch (e) {
       deviceStatus = 'Nao foi possivel consultar o Android: $e';
     } finally {
+      _update();
+    }
+  }
+
+  void selectSource(String code) {
+    if (running || busy || getLinguaLanguage(code) == null) return;
+    selectedSource = code;
+    if (code == selectedTarget) {
+      selectedTarget = code == 'pt' ? 'en' : 'pt';
+    }
+    _update();
+  }
+
+  void selectTarget(String code) {
+    if (running || busy || getLinguaLanguage(code) == null) return;
+    selectedTarget = code;
+    if (code == selectedSource) {
+      selectedSource = code == 'pt' ? 'en' : 'pt';
+    }
+    _update();
+  }
+
+  Future<void> refreshLanguagePacks() async {
+    if (busy || running) return;
+    busy = true;
+    packFeedback = 'Consultando modelos disponíveis neste aplicativo…';
+    _update();
+    try {
+      for (final language in linguaLanguages) {
+        languagePacks[language.code] = PackState.checking;
+        _update();
+        try {
+          final installed = await _models
+              .isModelDownloaded(language.translateCode.bcpCode)
+              .timeout(const Duration(seconds: 8));
+          languagePacks[language.code] =
+              installed ? PackState.installed : PackState.absent;
+        } catch (_) {
+          languagePacks[language.code] = PackState.failed;
+        }
+        _update();
+      }
+      packFeedback = 'Verificação concluída. Baixe apenas os idiomas que usar.';
+    } finally {
+      busy = false;
+      _update();
+    }
+  }
+
+  Future<void> installLanguagePack(String code) async {
+    final language = getLinguaLanguage(code);
+    if (language == null || busy || running) return;
+    busy = true;
+    warning = null;
+    languagePacks[code] = PackState.installing;
+    packFeedback = 'Preparando ${language.name} no aplicativo…';
+    _update();
+    try {
+      final modelCode = language.translateCode.bcpCode;
+      final installed = await _models.isModelDownloaded(modelCode)
+          .timeout(const Duration(seconds: 12));
+      if (!installed) {
+        final ok = await _models.downloadModel(modelCode,
+          isWifiRequired: !allowMobileDataForModels,
+        ).timeout(const Duration(seconds: 180));
+        if (!ok) throw StateError('O motor não confirmou a instalação.');
+      }
+      final confirmed = await _models.isModelDownloaded(modelCode)
+          .timeout(const Duration(seconds: 12));
+      if (!confirmed) throw StateError('O modelo não foi encontrado após preparar.');
+      languagePacks[code] = PackState.installed;
+      packFeedback = '${language.name} pronto para tradução offline.';
+    } catch (e) {
+      languagePacks[code] = PackState.failed;
+      packFeedback = 'Não foi possível instalar ${language.name} neste aparelho: $e';
+    } finally {
+      busy = false;
+      _update();
+    }
+  }
+
+  Future<void> removeLanguagePack(String code) async {
+    if (busy || running || (code == 'pt' && selectedTarget == 'pt')) return;
+    final language = getLinguaLanguage(code);
+    if (language == null) return;
+    busy = true;
+    packFeedback = 'Liberando espaço de ${language.name}…';
+    _update();
+    try {
+      await _models.deleteModel(language.translateCode.bcpCode)
+          .timeout(const Duration(seconds: 20));
+      languagePacks[code] = PackState.absent;
+      packFeedback = 'Pacote de ${language.name} removido do telefone.';
+    } catch (e) {
+      languagePacks[code] = PackState.failed;
+      packFeedback = 'Não foi possível remover o pacote: $e';
+    } finally {
+      busy = false;
+      _update();
+    }
+  }
+
+  Future<void> setTextTranslation(String input) async {
+    if (busy || running || input.trim().isEmpty) return;
+    final source = getLinguaLanguage(selectedSource);
+    final target = getLinguaLanguage(selectedTarget);
+    if (source == null || target == null || source.code == target.code) return;
+    busy = true;
+    warning = null;
+    status = 'Traduzindo ${source.name} → ${target.name}…';
+    _update();
+    OnDeviceTranslator? translator;
+    try {
+      // Valide que OS DOIS modelos estão prontos; nunca force download oculto.
+      for (final language in [source, target]) {
+        final available = await _models.isModelDownloaded(
+          language.translateCode.bcpCode,
+        ).timeout(const Duration(seconds: 10));
+        if (!available) {
+          languagePacks[language.code] = PackState.absent;
+          packFeedback = 'Prepare ${language.name} na biblioteca para traduzir.';
+          status = 'Modelo de tradução não preparado';
+          return;
+        }
+      }
+      translator = OnDeviceTranslator(
+        sourceLanguage: source.translateCode,
+        targetLanguage: target.translateCode,
+      );
+      final result = await translator.translateText(input.trim())
+          .timeout(const Duration(seconds: 25));
+      original = input.trim();
+      portuguese = target.code == 'pt' ? result : '';
+      english = target.code != 'pt' ? result : '';
+      history.insert(0, TranslationTurn(
+        source: original, translation: result,
+        fromEnglish: source.code == 'en',
+      ));
+      if (history.length > 8) history.removeRange(8, history.length);
+      status = 'Tradução para ${target.name} concluída';
+      packFeedback = 'Traduzido localmente, sem API paga.';
+    } catch (e) {
+      status = 'A tradução não pôde ser concluída';
+      packFeedback = 'Erro do motor local: $e';
+    } finally {
+      translator?.close();
+      busy = false;
       _update();
     }
   }
