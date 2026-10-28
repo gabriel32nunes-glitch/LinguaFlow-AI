@@ -59,6 +59,9 @@ class TranslationController extends ChangeNotifier {
   // O modelo é baixado uma vez. Não impomos Wi-Fi para evitar espera sem fim.
   // Pode utilizar o plano de dados do celular na primeira instalação.
   bool allowMobileDataForModels = true;
+  bool modelsReady = false;
+  bool microphoneOnly = false;
+  String modelsStatus = 'Modelos ainda não verificados';
   String status = 'Pronto para iniciar';
   String partial = '';
   String portuguese = '';
@@ -81,52 +84,67 @@ class TranslationController extends ChangeNotifier {
     _update();
   }
 
-  Future<void> start() async {
+  /// A v0.4 NÃO inicia download quando o usuário pede tradução. O download
+  /// é uma ação separada e toda chamada ao plugin tem limite de espera.
+  Future<void> start({bool microphoneOnly = false}) async {
     if (running || busy) return;
     busy = true;
     warning = null;
-    status = 'Verificando o aparelho…';
+    this.microphoneOnly = microphoneOnly;
+    status = 'Verificando suporte de voz local do Samsung…';
     _update();
     try {
-      final support = Map<dynamic, dynamic>.from(
-        await _speech.invokeMethod<dynamic>('checkSupport') as Map,
-      );
+      final raw = await _speech.invokeMethod<dynamic>('checkSupport')
+          .timeout(const Duration(seconds: 10));
+      if (raw is! Map) {
+        throw StateError('O Android não respondeu à verificação de áudio.');
+      }
+      final support = Map<dynamic, dynamic>.from(raw);
       if (support['supported'] != true) {
         throw StateError(support['message']?.toString() ??
-            'Este Android não oferece reconhecimento bilíngue local.');
+            'Este Android não oferece reconhecimento de voz bilíngue local.');
       }
 
-      final mic = await Permission.microphone.request();
+      final mic = await Permission.microphone.request()
+          .timeout(const Duration(seconds: 20));
       if (!mic.isGranted) {
-        throw StateError('Autorize o microfone nas configurações do Android.');
+        throw StateError('Permita acesso ao microfone nas configurações do Android.');
       }
-
-      status = 'Verificando modelos de tradução instalados…';
-      _update();
-      await _downloadModels();
-      await _initializeVoices();
-
+      if (!microphoneOnly) {
+        // Não começar tradução enquanto o ML Kit não tiver modelos de fato.
+        final available = await _verifyModels();
+        if (!available) {
+          throw StateError('Falta um modelo de tradução. Toque em "Baixar modelos" '
+              'e veja o resultado. O modo "Testar microfone" funciona sem modelos.');
+        }
+        status = 'Preparando as vozes locais…';
+        _update();
+        await _initializeVoices().timeout(const Duration(seconds: 20));
+      }
       await _events?.cancel();
       _events = _speechEvents.receiveBroadcastStream().listen(
         _onSpeechEvent,
         onError: (Object err) {
-          warning = 'Erro do reconhecimento de voz: $err';
-          status = 'Reconhecimento interrompido';
+          warning = 'Erro no reconhecimento de voz: $err';
+          status = 'Microfone interrompido';
           running = false;
           unawaited(_events?.cancel() ?? Future<void>.value());
           _events = null;
           _update();
         },
       );
-
-      // Reconhecimento estritamente LOCAL: Android 14+ com provedor no aparelho.
-      await _speech.invokeMethod<void>('start');
+      await _speech.invokeMethod<void>('start')
+          .timeout(const Duration(seconds: 15));
       running = true;
-      status = 'Ouvindo português e inglês…';
+      status = microphoneOnly
+          ? 'TESTE: ouvindo voz sem tentar traduzir…'
+          : 'Tradução bilateral ativa — ouvindo…';
       _update();
     } catch (e) {
       warning = e.toString().replaceFirst('Bad state: ', '');
-      status = 'Não foi possível iniciar';
+      status = microphoneOnly
+          ? 'Não foi possível iniciar o teste do microfone'
+          : 'Não foi possível iniciar a tradução';
       running = false;
       await _events?.cancel();
       _events = null;
@@ -136,55 +154,111 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
-  Future<void> _downloadModels() async {
-    final modelsToCheck = <(String, String)>[
+  Future<bool> _verifyModels() async {
+    final installed = <String>[];
+    final missing = <String>[];
+    for (final (code, label) in <(String, String)>[
       (TranslateLanguage.english.bcpCode, 'inglês'),
       (TranslateLanguage.portuguese.bcpCode, 'português'),
-    ];
-    for (final (code, label) in modelsToCheck) {
-      try {
-        status = 'Verificando modelo de $label ($code)…';
-        _update();
-        final alreadyInstalled = await _models.isModelDownloaded(code)
-            .timeout(const Duration(seconds: 15));
-        if (alreadyInstalled) continue;
+    ]) {
+      status = 'Verificando modelo: $label ($code)…';
+      _update();
+      final ok = await _models.isModelDownloaded(code)
+          .timeout(const Duration(seconds: 12));
+      (ok ? installed : missing).add(label);
+    }
+    modelsReady = missing.isEmpty;
+    modelsStatus = modelsReady
+        ? 'Inglês e português instalados. Tradução liberada.'
+        : 'Não instalados: ${missing.join(', ')}. Instalados: ${installed.isEmpty ? 'nenhum' : installed.join(', ')}.';
+    _update();
+    return modelsReady;
+  }
 
-        var seconds = 0;
-        status = 'Baixando modelo de $label ($code) — primeira utilização…';
+  Future<void> checkModelStatus() async {
+    if (busy || running) return;
+    busy = true;
+    warning = null;
+    _update();
+    try {
+      await _verifyModels();
+      status = modelsReady ? 'Modelos prontos para uso' : 'Modelos ausentes';
+    } on TimeoutException {
+      status = 'Verificação interrompida';
+      warning = 'A verificação não respondeu em até 12 segundos por idioma. '
+          'Isso indica falha de comunicação com o ML Kit no aparelho.';
+    } catch (e) {
+      status = 'Falha na verificação';
+      warning = 'Erro do ML Kit ao verificar: $e';
+    } finally {
+      busy = false;
+      _update();
+    }
+  }
+
+  Future<void> prepareModels() async {
+    if (busy || running) return;
+    busy = true;
+    warning = null;
+    modelsReady = false;
+    status = 'Iniciando download dos modelos de tradução…';
+    _update();
+    try {
+      for (final (code, label) in <(String, String)>[
+        (TranslateLanguage.english.bcpCode, 'inglês'),
+        (TranslateLanguage.portuguese.bcpCode, 'português'),
+      ]) {
+        status = 'Consultando modelo de $label ($code)…';
         _update();
-        // O plugin não fornece porcentagem de progresso. Exibimos o tempo real.
-        final ticker = Timer.periodic(const Duration(seconds: 5), (_) {
-          seconds += 5;
-          status = 'Baixando modelo de $label ($code) — $seconds s. '
-              'Confira a internet; o modelo será usado offline depois.';
+        final hasModel = await _models.isModelDownloaded(code)
+            .timeout(const Duration(seconds: 12));
+        if (hasModel) {
+          status = '$label já está instalado.';
+          _update();
+          continue;
+        }
+        int elapsed = 0;
+        status = 'Baixando $label ($code), máximo 75 segundos…';
+        _update();
+        final timer = Timer.periodic(const Duration(seconds: 5), (_) {
+          elapsed += 5;
+          status = 'ML Kit: solicitando $label ($code), $elapsed/75 s. '
+              'Se não completar, aparecerá uma mensagem de erro.';
           _update();
         });
-        var downloaded = false;
         try {
-          downloaded = await _models.downloadModel(
-            code,
-            isWifiRequired: !allowMobileDataForModels,
-          ).timeout(const Duration(minutes: 2));
+          final downloaded = await _models.downloadModel(
+            code, isWifiRequired: !allowMobileDataForModels,
+          ).timeout(const Duration(seconds: 75));
+          if (!downloaded) {
+            throw StateError('O ML Kit não confirmou o download de $label ($code).');
+          }
         } finally {
-          ticker.cancel();
+          timer.cancel();
         }
-        if (!downloaded ||
-            !await _models.isModelDownloaded(code)
-                .timeout(const Duration(seconds: 15))) {
-          throw StateError('O arquivo do idioma não foi confirmado pelo Android.');
-        }
-        status = 'Modelo de $label pronto!';
+        status = '$label retornou do download; conferindo instalação…';
         _update();
-      } on TimeoutException {
-        throw StateError('O modelo de $label ($code) não terminou de baixar em até '
-            '2 minutos. Verifique a internet, desative VPN/DNS privado '
-            'se estiver usando, atualize o Google Play Services e tente de novo. '
-            'O download anterior pode continuar em segundo plano.');
-      } on PlatformException catch (error) {
-        throw StateError('Não foi possível obter o modelo de $label ($code): '
-            '${error.message ?? error.code}. Confira a internet, espaço livre e '
-            'Google Play Services.');
+        final confirmed = await _models.isModelDownloaded(code)
+            .timeout(const Duration(seconds: 12));
+        if (!confirmed) throw StateError('Download de $label retornou, mas o modelo não está instalado.');
       }
+      await _verifyModels();
+      status = modelsReady ? 'Modelos instalados. Pode iniciar a tradução!' : 'Ainda faltam modelos';
+    } on TimeoutException {
+      status = 'DOWNLOAD INTERROMPIDO (tempo esgotado)';
+      warning = 'O ML Kit não concluiu a operação dentro do limite. '
+          'Não é preciso deixar a tela presa: tente verificar modelos novamente mais tarde. '
+          'O download interno do Android pode continuar mesmo após esse aviso.';
+    } on PlatformException catch (e) {
+      status = 'Falha ao baixar modelos';
+      warning = 'Erro Android/ML Kit: ${e.code} — ${e.message ?? 'sem mensagem'}. '
+          'Envie uma captura deste erro para corrigirmos a causa.';
+    } catch (e) {
+      status = 'Falha ao baixar modelos';
+      warning = 'Problema no ML Kit: $e';
+    } finally {
+      busy = false;
+      _update();
     }
   }
 
@@ -248,6 +322,11 @@ class TranslationController extends ChangeNotifier {
       partial = '';
       if (text.isEmpty) return;
       original = text;
+      if (microphoneOnly) {
+        status = 'Microfone OK: fala reconhecida! Teste novamente ou encerre.';
+        _update();
+        return;
+      }
       status = 'Identificando idioma…';
       _update();
 
@@ -317,7 +396,8 @@ class TranslationController extends ChangeNotifier {
     busy = false;
     speaking = false;
     partial = '';
-    status = 'Tradução encerrada';
+    status = 'Sessão encerrada';
+    microphoneOnly = false;
     _update();
     try {
       await _speech.invokeMethod<void>('stop');
@@ -372,15 +452,15 @@ class _TranslationPageState extends State<TranslationPage> {
     super.dispose();
   }
 
-  Future<void> _toggle() async {
+  Future<void> _toggle({bool microphoneOnly = false}) async {
     if (controller.running) {
       await controller.stop();
     } else if (!consent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Avise as pessoas antes de iniciar a tradução.')),
+        const SnackBar(content: Text('Avise as pessoas antes de usar o microfone.')),
       );
     } else {
-      await controller.start();
+      await controller.start(microphoneOnly: microphoneOnly);
     }
   }
 
@@ -409,8 +489,15 @@ class _TranslationPageState extends State<TranslationPage> {
             const Text('Conversa bilateral, sem botões por frase.',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, height: 1.15)),
             const SizedBox(height: 10),
+            const Text('VERSÃO 0.4 · DIAGNÓSTICO DE MODELOS',
+                style: TextStyle(color: Color(0xFF59DFBE),
+                    fontSize: 13, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
             Text(controller.status,
                 style: const TextStyle(color: Color(0xFFA6B8CA), fontSize: 14)),
+            const SizedBox(height: 8),
+            Text('Modelos: ${controller.modelsStatus}',
+              style: const TextStyle(color: Color(0xFFFFD285), fontSize: 13)),
             const SizedBox(height: 20),
             _TranslationCard(
               heading: '🇺🇸 Inglês → Português',
@@ -459,6 +546,24 @@ class _TranslationPageState extends State<TranslationPage> {
                   'e pode consumir a franquia de dados do celular.'),
               contentPadding: EdgeInsets.zero,
             ),
+            if (!running) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: controller.busy ? null : controller.checkModelStatus,
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Verificar modelos instalados'),
+              ),
+              OutlinedButton.icon(
+                onPressed: controller.busy ? null : controller.prepareModels,
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('Baixar modelos inglês e português'),
+              ),
+              OutlinedButton.icon(
+                onPressed: controller.busy ? null : () => _toggle(microphoneOnly: true),
+                icon: const Icon(Icons.hearing),
+                label: const Text('Testar microfone SEM tradução'),
+              ),
+            ],
             if (controller.busy) const Padding(
               padding: EdgeInsets.symmetric(vertical: 10),
               child: LinearProgressIndicator(),
@@ -472,10 +577,10 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: controller.busy ? null : _toggle,
+              onPressed: controller.busy ? null : () => _toggle(),
               icon: Icon(running ? Icons.stop_circle_outlined : Icons.mic),
               label: Text(controller.busy ? 'Preparando…' :
-                  running ? 'Encerrar escuta' : 'Iniciar tradução automática'),
+                  running ? 'Encerrar sessão' : 'Iniciar tradução automática'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(60),
                 backgroundColor: running ? const Color(0xFFF08A96) : accent,
@@ -484,10 +589,10 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Requer Android 14+ e reconhecimento de voz local com troca automática '
-                'de idiomas. Baixe previamente os modelos PT/EN e as vozes offline. '
-                'O app precisa ficar aberto nesta versão; não guarda gravações e '
-                'não utiliza serviços de tradução pagos. Durante a voz traduzida '
+            const Text('V0.4: modelos não são baixados automaticamente ao iniciar a escuta. '
+                'O teste de microfone funciona sem modelos. Tradução exige os pacotes PT/EN; Android 14+ '
+                'é necessário para troca de idioma no reconhecedor local. Mantenha a tela aberta; '
+                'não guarda gravações nem usa APIs pagas. Durante a voz traduzida '
                 'o microfone fica pausado para evitar realimentação.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Color(0xFF9AADC1), fontSize: 12, height: 1.45)),
