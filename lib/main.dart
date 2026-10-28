@@ -8,6 +8,7 @@ import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'work_phrases.dart';
 import 'language_direction.dart';
+import 'device_profile.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,7 +72,11 @@ class TranslationController extends ChangeNotifier {
   bool modelsReady = false;
   bool microphoneOnly = false;
   bool phraseOnly = false;
+  bool economyMode = true;
   String languageMode = 'auto';
+  DeviceProfile? deviceProfile;
+  String deviceStatus = 'Detectando versao Android e memoria…';
+  String? deviceNotice;
   final List<TranslationTurn> history = [];
   String modelsStatus = 'Modelos ainda não verificados';
   String status = 'Pronto para iniciar';
@@ -83,6 +88,51 @@ class TranslationController extends ChangeNotifier {
 
   void _update() {
     if (!_disposed) notifyListeners();
+  }
+
+  Future<void> inspectDevice() async {
+    try {
+      final response = await _speech.invokeMethod<dynamic>('deviceInfo')
+          .timeout(const Duration(seconds: 10));
+      if (response is! Map) {
+        deviceStatus = 'O Android nao informou as caracteristicas do aparelho.';
+        return;
+      }
+      final profile = DeviceProfile.fromPlatform(response);
+      deviceProfile = profile;
+      deviceStatus = '${profile.manufacturer} ${profile.model} · '
+          'Android API ${profile.sdkInt} · limite de memoria ${profile.memoryClassMb} MB '
+          '· voz local: ${profile.onDeviceSpeechAvailable ? 'disponivel' : 'indisponivel'}';
+      if (profile.isGalaxyA14FourG || profile.lowRamDevice) {
+        economyMode = true;
+      }
+      final safeMode = profile.safeLanguageMode(languageMode);
+      if (safeMode != languageMode) {
+        languageMode = safeMode;
+        deviceNotice = 'Este Android nao permite solicitar alternancia automatica PT/EN. '
+            'Inicie em Portugues e selecione English quando necessario. '
+            'Sem toques por frase no mesmo idioma.';
+      } else if (!profile.onDeviceSpeechAvailable) {
+        deviceNotice = 'Reconhecimento de voz estritamente offline nao esta disponivel '
+            'neste Android. Frases prontas escritas continuam utilizaveis.';
+      } else {
+        deviceNotice = null;
+      }
+    } on MissingPluginException {
+      deviceStatus = 'Diagnostico Android so esta disponivel no celular.';
+    } on TimeoutException {
+      deviceStatus = 'O Android nao respondeu ao diagnostico em 10 segundos.';
+    } catch (e) {
+      deviceStatus = 'Nao foi possivel consultar o Android: $e';
+    } finally {
+      _update();
+    }
+  }
+
+  void setEconomyMode(bool enabled) {
+    if (running || busy) return;
+    economyMode = enabled;
+    _update();
   }
 
   void setLanguageMode(String value) {
@@ -118,6 +168,9 @@ class TranslationController extends ChangeNotifier {
     status = 'Verificando suporte de voz local do Samsung…';
     _update();
     try {
+      if (deviceProfile == null) {
+        await inspectDevice();
+      }
       final raw = await _speech.invokeMethod<dynamic>('checkSupport', {'languageMode': languageMode})
           .timeout(const Duration(seconds: 10));
       if (raw is! Map) {
@@ -163,7 +216,10 @@ class TranslationController extends ChangeNotifier {
           _update();
         },
       );
-      await _speech.invokeMethod<void>('start', {'languageMode': languageMode})
+      await _speech.invokeMethod<void>('start', {
+        'languageMode': languageMode,
+        'economyMode': economyMode,
+      })
           .timeout(const Duration(seconds: 15));
       running = true;
       status = microphoneOnly
@@ -361,7 +417,9 @@ class TranslationController extends ChangeNotifier {
     history.insert(0, TranslationTurn(
       source: sourceText, translation: translation, fromEnglish: fromEnglish,
     ));
-    if (history.length > 12) history.removeLast();
+    final capacity = deviceProfile?.historyCapacity(economyEnabled: economyMode)
+        ?? (economyMode ? 8 : 12);
+    if (history.length > capacity) history.removeRange(capacity, history.length);
     warning = null;
     status = 'Tradução concluída';
     _update();
@@ -555,6 +613,7 @@ class _TranslationPageState extends State<TranslationPage> {
   void initState() {
     super.initState();
     controller.addListener(_refresh);
+    unawaited(controller.inspectDevice());
   }
 
   void _refresh() {
@@ -605,7 +664,7 @@ class _TranslationPageState extends State<TranslationPage> {
             const Text('Conversa bilateral, sem botões por frase.',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, height: 1.15)),
             const SizedBox(height: 10),
-            const Text('VERSÃO 0.5 · TRABALHO OFFLINE',
+            const Text('VERSÃO 0.6 · PERFIL GALAXY A14 4G',
                 style: TextStyle(color: Color(0xFF59DFBE),
                     fontSize: 13, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
@@ -614,6 +673,17 @@ class _TranslationPageState extends State<TranslationPage> {
             const SizedBox(height: 8),
             Text('Modelos: ${controller.modelsStatus}',
               style: const TextStyle(color: Color(0xFFFFD285), fontSize: 13)),
+            const SizedBox(height: 6),
+            Text(controller.deviceStatus,
+              style: const TextStyle(color: Color(0xFFA1C6DC), fontSize: 12)),
+            if (controller.deviceNotice != null) ...[
+              const SizedBox(height: 8),
+              _InfoTile(
+                icon: Icons.info_outline,
+                title: 'Compatibilidade do seu Android',
+                content: controller.deviceNotice!,
+              ),
+            ],
             const SizedBox(height: 20),
             _TranslationCard(
               heading: '🇺🇸 Inglês → Português',
@@ -759,6 +829,14 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             const SizedBox(height: 14),
             SwitchListTile.adaptive(
+              value: controller.economyMode,
+              onChanged: running || controller.busy ? null : controller.setEconomyMode,
+              title: const Text('Modo econômico Galaxy A14 4G'),
+              subtitle: const Text('Menos atualizacoes na escuta, pausas maiores no silencio '
+                  'e historico limitado para economizar recursos.'),
+              contentPadding: EdgeInsets.zero,
+            ),
+            SwitchListTile.adaptive(
               value: controller.audioEnabled,
               onChanged: controller.setAudioEnabled,
               title: const Text('Falar tradução em voz alta'),
@@ -832,7 +910,8 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('V0.5: sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
+            const Text('V0.6: perfil A14 4G reduz tentativas e consumo. '
+                'Sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
                 'Fala livre ainda exige ML Kit. '
                 'O teste de microfone funciona sem modelos. Tradução exige os pacotes PT/EN; Android 14+ '
                 'é necessário para troca de idioma no reconhecedor local. Mantenha a tela aberta; '
