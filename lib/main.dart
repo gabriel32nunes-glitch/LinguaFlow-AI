@@ -75,6 +75,9 @@ class TranslationController extends ChangeNotifier {
   bool phraseOnly = false;
   bool economyMode = true;
   bool allowSystemRecognition = false;
+  bool tvMode = false;
+  double? tvAudioLevelDb;
+  int tvRecognizedSegments = 0;
   String languageMode = 'auto';
   DeviceProfile? deviceProfile;
   String deviceStatus = 'Detectando versao Android e memoria…';
@@ -135,6 +138,24 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
+  void setTvMode(bool enabled) {
+    if (running || busy) return;
+    tvMode = enabled;
+    tvAudioLevelDb = null;
+    tvRecognizedSegments = 0;
+    if (enabled) {
+      languageMode = 'en';
+      // TV continua tocando durante a traducao: voz sintetizada pode causar eco
+      // e ocultar trechos. Legendas ficam ativadas como padrao.
+      audioEnabled = false;
+      status = 'Modo TV: ouvir ingles e exibir legendas em portugues';
+    } else {
+      status = 'Pronto para iniciar';
+    }
+    warning = null;
+    _update();
+  }
+
   void setAllowSystemRecognition(bool enabled) {
     if (running || busy) return;
     allowSystemRecognition = enabled;
@@ -177,7 +198,12 @@ class TranslationController extends ChangeNotifier {
     busy = true;
     warning = null;
     this.microphoneOnly = microphoneOnly;
-    status = 'Verificando suporte de voz local do Samsung…';
+    tvAudioLevelDb = null;
+    tvRecognizedSegments = 0;
+    if (tvMode) languageMode = 'en';
+    status = tvMode
+        ? 'Configurando microfone para escutar a televisao em ingles…'
+        : 'Verificando suporte de voz local do Samsung…';
     _update();
     try {
       if (deviceProfile == null) {
@@ -186,6 +212,7 @@ class TranslationController extends ChangeNotifier {
       final raw = await _speech.invokeMethod<dynamic>('checkSupport', {
         'languageMode': languageMode,
         'allowSystemRecognition': allowSystemRecognition,
+        'tvMode': tvMode,
       })
           .timeout(const Duration(seconds: 10));
       if (raw is! Map) {
@@ -249,9 +276,14 @@ class TranslationController extends ChangeNotifier {
       running = true;
       status = microphoneOnly
           ? 'TESTE: ouvindo voz sem tentar traduzir…'
-          : phraseOnly
-              ? 'Ouvindo frases prontas PT/EN (traducao limitada)…'
-              : 'Tradução bilateral ativa — ouvindo…';
+          : tvMode
+              ? (phraseOnly
+                  ? 'TV: ouvindo ingles. Modelos de traducao indisponiveis; '
+                      'somente frases prontas podem ser traduzidas.'
+                  : 'TV: ouvindo ingles e traduzindo trechos para portugues…')
+              : phraseOnly
+                  ? 'Ouvindo frases prontas PT/EN (traducao limitada)…'
+                  : 'Tradução bilateral ativa — ouvindo…';
       _update();
     } catch (e) {
       warning = e.toString().replaceFirst('Bad state: ', '');
@@ -404,6 +436,13 @@ class TranslationController extends ChangeNotifier {
     if (!running || payload is! Map) return;
     final event = payload.map((key, value) => MapEntry(key.toString(), value));
     switch (event['type']) {
+      case 'audioLevel':
+        final level = event['level'];
+        if (tvMode && level is num) {
+          tvAudioLevelDb = level.toDouble().clamp(-2.0, 12.0);
+          _update();
+        }
+        break;
       case 'partial':
         partial = event['text']?.toString() ?? '';
         _update();
@@ -470,6 +509,7 @@ class TranslationController extends ChangeNotifier {
       partial = '';
       if (text.isEmpty) return;
       original = text;
+      if (tvMode) tvRecognizedSegments++;
       if (microphoneOnly) {
         status = 'Microfone OK: fala reconhecida! Teste novamente ou encerre.';
         _update();
@@ -479,8 +519,13 @@ class TranslationController extends ChangeNotifier {
         final match = matchSpokenWorkPhrase(text);
         if (match == null) {
           status = 'Frase fora do catalogo offline';
-          warning = 'Sem os modelos ML Kit, so posso traduzir as frases '
-              'exibidas no catalogo profissional. Nao foi feita uma traducao inventada.';
+          warning = tvMode
+              ? 'O ingles da TV foi reconhecido, mas o tradutor livre '
+                  'ainda nao tem os modelos do Google ML Kit. '
+                  'O texto original aparece em Ultima fala. '
+                  'Somente frases predefinidas do catalogo serao traduzidas.'
+              : 'Sem os modelos ML Kit, so posso traduzir as frases '
+                  'exibidas no catalogo profissional. Nao foi feita uma traducao inventada.';
           _update();
           return;
         }
@@ -530,7 +575,9 @@ class TranslationController extends ChangeNotifier {
         if (running) {
           try {
             await _speech.invokeMethod<void>('resume');
-            status = 'Ouvindo português e inglês…';
+            status = tvMode
+                ? 'TV: ouvindo proxima frase em ingles…'
+                : 'Ouvindo português e inglês…';
           } catch (e) {
             warning = 'Não foi possível continuar escutando: $e';
             status = 'Reconhecimento interrompido';
@@ -595,6 +642,7 @@ class TranslationController extends ChangeNotifier {
     status = 'Sessão encerrada';
     microphoneOnly = false;
     phraseOnly = false;
+    tvAudioLevelDb = null;
     _update();
     try {
       await _speech.invokeMethod<void>('stop');
@@ -720,8 +768,10 @@ class _TranslationPageState extends State<TranslationPage> {
                       color: Color(0xFF69E2DD),
                     )),
                 const SizedBox(height: 5),
-                const Text('CONVERSA SEM BARREIRAS',
-                    style: TextStyle(fontSize: 16, letterSpacing: 0.7,
+                Text(controller.tvMode
+                    ? 'MODO VÍDEO / TELEVISÃO'
+                    : 'CONVERSA SEM BARREIRAS',
+                    style: const TextStyle(fontSize: 16, letterSpacing: 0.7,
                         fontWeight: FontWeight.w900)),
                 VoiceAura(
                   listening: running,
@@ -738,6 +788,34 @@ class _TranslationPageState extends State<TranslationPage> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                if (controller.tvMode) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    controller.tvAudioLevelDb == null
+                        ? 'Sinal de áudio: aguardando dados do reconhecedor'
+                        : 'Sinal de áudio informado pelo Android (não calibrado)',
+                    style: const TextStyle(fontSize: 11,
+                        color: Color(0xFFA5DBE2)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(width: 210,
+                    child: LinearProgressIndicator(
+                      minHeight: 7,
+                      borderRadius: BorderRadius.circular(20),
+                      value: controller.tvAudioLevelDb == null
+                          ? 0
+                          : ((controller.tvAudioLevelDb! + 2) / 14)
+                              .clamp(0.0, 1.0),
+                      color: const Color(0xFF55EFD0),
+                      backgroundColor: const Color(0xFF2B4056),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('Trechos reconhecidos: ${controller.tvRecognizedSegments}',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF9CB0D2))),
+                ],
                 if (controller.busy) ...[
                   const SizedBox(height: 12),
                   const LinearProgressIndicator(minHeight: 3),
@@ -745,6 +823,20 @@ class _TranslationPageState extends State<TranslationPage> {
               ]),
             ),
             const SizedBox(height: 15),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: controller.tvMode,
+              onChanged: running || controller.busy
+                  ? null : controller.setTvMode,
+              title: const Text('Modo Vídeo/TV · Inglês → Português',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              subtitle: const Text(
+                  'Ouve o áudio da TV pelo microfone; exibe legendas. '
+                  'Desliga voz traduzida para evitar eco. '
+                  'Não capta o áudio interno do YouTube.'),
+              secondary: const Icon(Icons.tv_rounded,
+                  color: Color(0xFF65E6D4)),
+            ),
             if (!running) CheckboxListTile(
               value: consent,
               onChanged: controller.busy
@@ -760,7 +852,8 @@ class _TranslationPageState extends State<TranslationPage> {
               icon: Icon(running ? Icons.stop_circle_rounded
                   : Icons.mic_rounded, size: 23),
               label: Text(controller.busy ? 'PREPARANDO…' :
-                  running ? 'ENCERRAR CONVERSA' : 'INICIAR CONVERSA'),
+                  running ? 'ENCERRAR CONVERSA' :
+                  controller.tvMode ? 'ESCUTAR TV EM INGLÊS' : 'INICIAR CONVERSA'),
               style: FilledButton.styleFrom(
                 backgroundColor: running
                     ? const Color(0xFFFF869E) : accent,
@@ -1017,7 +1110,11 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ],
             const SizedBox(height: 18),
-            const Text('V0.7: o serviço de voz Android alternativo só é usado com autorização '
+            const Text('Modo TV: microfone escuta o alto-falante da televisao. '
+                'Mesmo que o som chegue, o reconhecedor pode nao transcrever. '
+                'Ingles e selecionado manualmente e a legenda em portugues '
+                'exige modelos de traducao instalados. '
+                'O serviço de voz Android alternativo só é usado com autorização '
                 'e pode transmitir áudio pela internet. Efeitos de voz não medem volume real. '
                 'O perfil A14 4G reduz tentativas e consumo. '
                 'Sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
