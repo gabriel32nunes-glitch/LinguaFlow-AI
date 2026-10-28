@@ -13,8 +13,9 @@ void main() {
 
     await tester.pumpWidget(const LinguaFlowApp());
 
-    expect(find.textContaining('VERSÃO 0.5'), findsOneWidget);
+    expect(find.textContaining('VERSÃO 0.6'), findsOneWidget);
     expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
+    expect(find.textContaining('Modo econômico Galaxy A14 4G'), findsOneWidget);
   });
 }
