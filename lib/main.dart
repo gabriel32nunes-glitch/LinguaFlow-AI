@@ -84,7 +84,8 @@ class TranslationController extends ChangeNotifier {
   DeviceProfile? deviceProfile;
   String deviceStatus = 'Detectando versao Android e memoria…';
   String? deviceNotice;
-  final LocalWhisperVoice _whisper = LocalWhisperVoice();
+  LocalWhisperVoice? _localWhisper;
+  LocalWhisperVoice get _whisper => _localWhisper ??= LocalWhisperVoice();
   final WhisperTranscriptDelta _whisperDelta = WhisperTranscriptDelta();
   Timer? _whisperTicker;
   bool useWhisper = true;
@@ -993,7 +994,7 @@ class TranslationController extends ChangeNotifier {
     _disposed = true;
     running = false;
     _whisperTicker?.cancel();
-    unawaited(_whisper.dispose());
+    if (_localWhisper != null) unawaited(_localWhisper!.dispose());
     if (!useWhisper) unawaited(_speech.invokeMethod<void>('stop'));
     unawaited(_tts.stop());
     unawaited(_events?.cancel() ?? Future<void>.value());
