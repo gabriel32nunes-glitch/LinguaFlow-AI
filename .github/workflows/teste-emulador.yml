@@ -1,0 +1,96 @@
+name: Testar LinguaFlow no emulador Android
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: linguaflow-emulator-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-smoke:
+    name: Android API ${{ matrix.api }} (A14/atual)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [33, 35]
+    timeout-minutes: 50
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Incluir Whisper multilingue no APK
+        run: |
+          mkdir -p assets/models
+          curl -fL --retry 3 --connect-timeout 20 --max-time 300 \
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/f281eb45af861ab5e5297d23694b7d46e090c02c/ggml-tiny-q5_1.bin' \
+            -o assets/models/ggml-tiny-q5_1.bin
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  assets/models/ggml-tiny-q5_1.bin' | sha256sum -c -
+
+      - name: Preparar projeto Android
+        run: |
+          flutter create . --platforms android
+          python3 setup_android.py
+          flutter pub get
+          # flutter create gera um teste de exemplo para MyApp, que nao existe aqui.
+          rm -f test/widget_test.dart
+
+      - name: Testes Flutter
+        run: flutter test
+
+      - name: Aceitar licencas Android e preparar NDK Whisper
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --licenses < <(printf 'y\n%.0s' {1..100}) >/dev/null
+          "$SDKMANAGER" --install 'ndk;29.0.13113456'
+
+      - name: Compilar APK
+        run: flutter build apk --debug
+
+      - name: Autorizar aceleracao KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Instalar e abrir APK em emulador Android 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          script: bash ci/smoke_android.sh
+
+      - name: Publicar APK experimental apenas apos os testes
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaFlow-V09-Android-${{ matrix.api }}-APK-EXPERIMENTAL
+          path: build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Publicar logs e captura de tela do emulador
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linguaflow-emulator-diagnostico-${{ matrix.api }}
+          path: ci-artifacts/
+          if-no-files-found: ignore

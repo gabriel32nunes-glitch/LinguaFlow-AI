@@ -28,6 +28,41 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         build = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', build)
         build = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 31', build)
         build = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35', build)
+    # APKs oficiais usam a mesma chave guardada apenas em GitHub Secrets.
+    # APKs experimentais continuam com a chave debug do Flutter.
+    if p.suffix == '.kts':
+        if 'linguaflowRelease' not in build:
+            marker = '    buildTypes {'
+            if marker not in build:
+                raise SystemExit('Nao foi encontrado buildTypes no Gradle Kotlin DSL.')
+            signing = """    signingConfigs {
+        val signingPath = System.getenv("LINGUAFLOW_KEYSTORE_PATH")
+        if (!signingPath.isNullOrBlank()) {
+            create("linguaflowRelease") {
+                storeFile = file(signingPath)
+                storeType = "JKS"
+                storePassword = System.getenv("LINGUAFLOW_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("LINGUAFLOW_KEY_ALIAS")
+                keyPassword = System.getenv("LINGUAFLOW_KEY_PASSWORD")
+            }
+        }
+    }
+
+"""
+            build = build.replace(marker, signing + marker, 1)
+            debug = 'signingConfig = signingConfigs.getByName("debug")'
+            if debug not in build:
+                raise SystemExit('A configuracao de assinatura do Flutter mudou.')
+            release = """signingConfig = if (
+                    System.getenv("LINGUAFLOW_KEYSTORE_PATH").isNullOrBlank()
+                ) signingConfigs.getByName("debug")
+                  else signingConfigs.getByName("linguaflowRelease")"""
+            build = build.replace(debug, release, 1)
+    else:
+        # Exigir Kotlin DSL ao produzir APK oficial.
+        if 'LINGUAFLOW_KEYSTORE_PATH' in __import__('os').environ:
+            raise SystemExit('Assinatura estavel exige Gradle Kotlin DSL.')
+
     # Erro explícito se o template padrão mudou (melhor que sobrescrever errado).
     if not re.search(r'(minSdk\s*=\s*31|minSdkVersion\s+31)', build):
         raise SystemExit('Atenção: o template Gradle mudou. Configure manualmente minSdk 31 em ' + str(p))

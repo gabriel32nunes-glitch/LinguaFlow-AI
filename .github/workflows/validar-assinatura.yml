@@ -1,0 +1,131 @@
+name: Validar assinatura permanente LinguaFlow
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/android-emulator-smoke]
+    paths:
+      - .github/workflows/validar-assinatura.yml
+
+permissions:
+  contents: read
+
+jobs:
+  assinatura:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      LINGUAFLOW_KEYSTORE_PATH: ${{ github.workspace }}/android/app/linguaflow-upload.jks
+      LINGUAFLOW_KEYSTORE_PASSWORD: ${{ secrets.LINGUAFLOW_KEYSTORE_PASSWORD }}
+      LINGUAFLOW_KEY_PASSWORD: ${{ secrets.LINGUAFLOW_KEY_PASSWORD }}
+      LINGUAFLOW_KEY_ALIAS: ${{ secrets.LINGUAFLOW_KEY_ALIAS }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.LINGUAFLOW_KEYSTORE_BASE64 }}
+    steps:
+      - name: Obter projeto
+        uses: actions/checkout@v4
+
+      - name: Validar segredos sem mostrar seus valores
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret in ANDROID_KEYSTORE_BASE64 LINGUAFLOW_KEYSTORE_PASSWORD LINGUAFLOW_KEY_PASSWORD LINGUAFLOW_KEY_ALIAS; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::Falta configurar $secret em GitHub Actions Secrets"
+              exit 1
+            fi
+          done
+          echo "Os quatro segredos foram fornecidos ao job."
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Validar keystore e o certificado publico
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$LINGUAFLOW_KEYSTORE_PATH"
+          chmod 600 "$LINGUAFLOW_KEYSTORE_PATH"
+          test -s "$LINGUAFLOW_KEYSTORE_PATH"
+          keytool -exportcert -keystore "$LINGUAFLOW_KEYSTORE_PATH" \
+            -storepass:env LINGUAFLOW_KEYSTORE_PASSWORD \
+            -alias "$LINGUAFLOW_KEY_ALIAS" > "$RUNNER_TEMP/linguaflow-cert.der"
+          ACTUAL=$(openssl x509 -in "$RUNNER_TEMP/linguaflow-cert.der" \
+            -inform DER -noout -fingerprint -sha256 | cut -d= -f2 |
+            tr -d ':' | tr '[:upper:]' '[:lower:]')
+          EXPECTED="e8b0e0f513f3d0b3f38a27a2fed923cb9a7350ab5186b10ea0e100fb9a20d047"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::A chave privada nao corresponde ao certificado oficial do LinguaFlow."
+            exit 1
+          fi
+          echo "Certificado oficial validado (somente impressao digital publica)."
+
+      - name: Incluir modelo Whisper verificado
+        shell: bash
+        run: |
+          mkdir -p assets/models
+          curl -fL --retry 3 --connect-timeout 20 --max-time 300 \
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/f281eb45af861ab5e5297d23694b7d46e090c02c/ggml-tiny-q5_1.bin' \
+            -o assets/models/ggml-tiny-q5_1.bin
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  assets/models/ggml-tiny-q5_1.bin' | sha256sum -c -
+
+      - name: Preparar aplicativo assinado
+        shell: bash
+        run: |
+          flutter create . --platforms android
+          python3 setup_android.py
+          flutter pub get
+          rm -f test/widget_test.dart
+
+      - name: Executar testes Flutter
+        run: flutter test
+
+      - name: Preparar NDK Whisper
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --licenses < <(printf 'y\n%.0s' {1..100}) >/dev/null
+          "$SDKMANAGER" --install 'ndk;29.0.13113456'
+
+      - name: Compilar APK de verificacao com assinatura definitiva
+        shell: bash
+        run: |
+          flutter build apk --release --target-platform android-arm64 \
+            --build-name 0.9.0 --build-number 100001
+
+      - name: Confirmar assinatura do APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          APK_SIGNER=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify \
+            --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
+            tr '[:upper:]' '[:lower:]' | tr -d '\r')
+          EXPECTED="e8b0e0f513f3d0b3f38a27a2fed923cb9a7350ab5186b10ea0e100fb9a20d047"
+          if [ "$APK_SIGNER" != "$EXPECTED" ]; then
+            echo "::error::APK nao assinado com certificado oficial."
+            exit 1
+          fi
+          echo "APK assinado e verificado; publicacao nao realizada neste teste."
+          ls -lh "$APK"
+
+      - name: Guardar APK privado para instalacao experimental
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaFlow-APK-ASSINADO-TESTE
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Excluir chave do runner
+        if: always()
+        run: rm -f "$LINGUAFLOW_KEYSTORE_PATH" "$RUNNER_TEMP/linguaflow-cert.der"

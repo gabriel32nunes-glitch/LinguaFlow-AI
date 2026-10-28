@@ -1,12 +1,15 @@
 package com.example.linguaflow_ai
 
 import android.Manifest
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -31,7 +34,15 @@ class MainActivity : FlutterActivity() {
     private var listening = false
     private var pendingTranslation = false
     private var detectedLanguage: String? = null
+    private var languageMode = "auto"
+    private var allowSystemRecognition = false
+    private var usingSystemRecognizer = false
     private var otherErrors = 0
+    private var economyMode = true
+    private var tvMode = false
+    private var lastAudioLevelAt = 0L
+    private var consecutiveSilence = 0
+    private var lastPartialAt = 0L
 
     private val retryRunnable = Runnable {
         if (active && !pendingTranslation && !listening) listenAgain()
@@ -42,15 +53,35 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodName)
             .setMethodCallHandler { call, reply ->
                 when (call.method) {
+                    "deviceInfo" -> {
+                        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        reply.success(mapOf(
+                            "sdkInt" to Build.VERSION.SDK_INT,
+                            "model" to Build.MODEL,
+                            "manufacturer" to Build.MANUFACTURER,
+                            "memoryClassMb" to manager.memoryClass,
+                            "lowRamDevice" to manager.isLowRamDevice,
+                            "onDeviceSpeechAvailable" to SpeechRecognizer.isOnDeviceRecognitionAvailable(this),
+                            "systemSpeechAvailable" to SpeechRecognizer.isRecognitionAvailable(this)
+                        ))
+                    }
                     "checkSupport" -> {
-                        val reason = checkSupport()
+                        val mode = call.argument<String>("languageMode")
+                            ?.takeIf { it == "en" || it == "pt" } ?: "auto"
+                        val allowSystem = call.argument<Boolean>("allowSystemRecognition") ?: false
+                        val reason = checkSupport(mode, allowSystem)
                         reply.success(mapOf(
                             "supported" to (reason == null),
                             "message" to (reason ?: "Pronto para áudio no próprio dispositivo")
                         ))
                     }
                     "start" -> {
-                        val reason = checkSupport()
+                        economyMode = call.argument<Boolean>("economyMode") ?: true
+                        tvMode = call.argument<Boolean>("tvMode") ?: false
+                        languageMode = call.argument<String>("languageMode")
+                            ?.takeIf { it == "en" || it == "pt" } ?: "auto"
+                        allowSystemRecognition = call.argument<Boolean>("allowSystemRecognition") ?: false
+                        val reason = checkSupport(languageMode, allowSystemRecognition)
                         if (reason != null) {
                             reply.error("UNSUPPORTED", reason, null)
                         } else {
@@ -89,8 +120,11 @@ class MainActivity : FlutterActivity() {
             })
     }
 
-    private fun checkSupport(): String? {
-        if (Build.VERSION.SDK_INT < 34) {
+    private fun checkSupport(
+        mode: String = languageMode,
+        permitSystemSpeech: Boolean = allowSystemRecognition
+    ): String? {
+        if (Build.VERSION.SDK_INT < 34 && mode == "auto") {
             return "Para detectar e alternar português/inglês automaticamente nesta versão, " +
                 "é necessário Android 14 ou superior. Nenhum serviço pago será usado."
         }
@@ -99,9 +133,16 @@ class MainActivity : FlutterActivity() {
             // O Flutter pedirá a permissão ANTES de começar. 'checkSupport' é consultado
             // antes disso, portanto a ausência da permissão não bloqueia esta consulta.
         }
-        if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
-            return "Este aparelho não possui reconhecedor de fala local disponível. " +
-                "Instale/ative o serviço de fala offline do Android e os modelos inglês/português."
+        val local = SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        val system = SpeechRecognizer.isRecognitionAvailable(this)
+        if (!local && !(permitSystemSpeech && system)) {
+            return if (system) {
+                "A voz offline não está disponível. Para testar o serviço Android de fala, " +
+                    "ative a opção opcional 'Reconhecimento via serviço do Android'. " +
+                    "Ele poderá precisar de internet e processar áudio fora do aparelho."
+            } else {
+                "Nenhum reconhecedor Android está disponível. Instale/ative o serviço de fala do sistema."
+            }
         }
         return null
     }
@@ -112,20 +153,45 @@ class MainActivity : FlutterActivity() {
             throw SecurityException("Permissão RECORD_AUDIO negada")
         }
         stopSession()
-        recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        usingSystemRecognizer = !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        recognizer = if (usingSystemRecognizer) {
+            if (!allowSystemRecognition) {
+                throw IllegalStateException("Serviço de fala remoto não autorizado")
+            }
+            SpeechRecognizer.createSpeechRecognizer(this)
+        } else {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        }
         recognizer!!.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 otherErrors = 0
-                send("status", "Ouvindo português e inglês…")
+                send("status", if (tvMode) "TV: aguardando fala em ingles…" else "Microfone pronto para ouvir…")
             }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBeginningOfSpeech() {
+                consecutiveSilence = 0
+                if (tvMode) send("status", "TV: fala detectada, transcrevendo ingles…")
+            }
+            override fun onRmsChanged(rmsdB: Float) {
+                if (!tvMode || !active || pendingTranslation) return
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastAudioLevelAt < 350L) return
+                lastAudioLevelAt = now
+                // onRmsChanged e opcional e NAO mede volume calibrado da TV.
+                send("audioLevel", level = rmsdB.coerceIn(-2.0f, 12.0f))
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                if (tvMode) send("status", "TV: trecho captado; processando legenda…")
+            }
             override fun onPartialResults(partialResults: Bundle?) {
                 val phrase = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.trim()
-                if (!phrase.isNullOrEmpty()) send("partial", text = phrase)
+                val now = SystemClock.elapsedRealtime()
+                val interval = if (economyMode) 800L else 350L
+                if (!phrase.isNullOrEmpty() && now - lastPartialAt >= interval) {
+                    lastPartialAt = now
+                    send("partial", text = phrase.take(240))
+                }
             }
             override fun onResults(results: Bundle?) {
                 listening = false
@@ -134,9 +200,16 @@ class MainActivity : FlutterActivity() {
                     ?.firstOrNull()?.trim()
                 if (phrase.isNullOrEmpty()) {
                     pendingTranslation = false
-                    scheduleRetry()
+                    consecutiveSilence++
+                    scheduleRetry(silenceRetryDelay())
                 } else {
-                    send("result", text = phrase, language = detectedLanguage)
+                    consecutiveSilence = 0
+                    val actualLanguage = when (languageMode) {
+                        "pt" -> "pt-BR"
+                        "en" -> "en-US"
+                        else -> detectedLanguage
+                    }
+                    send("result", text = phrase, language = actualLanguage)
                 }
             }
             override fun onError(error: Int) {
@@ -151,9 +224,22 @@ class MainActivity : FlutterActivity() {
                     return
                 }
                 pendingTranslation = false
-                // NO_MATCH and SPEECH_TIMEOUT often happen in silence; retry normally.
-                if (error != SpeechRecognizer.ERROR_NO_MATCH &&
-                    error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                if (error == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS) {
+                    active = false
+                    send("fatal", "O Android limitou tentativas excessivas de escuta (erro $error). " +
+                        "Aguarde antes de iniciar outra sessao.")
+                    return
+                }
+                val silent = error == SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                if (silent) {
+                    consecutiveSilence++
+                    if (tvMode && consecutiveSilence % 3 == 0) {
+                        send("status", "TV: audio presente, mas nenhuma frase foi reconhecida. "
+                            + "Confira idioma English e aproxime o celular da caixa de som.")
+                    }
+                } else {
+                    consecutiveSilence = 0
                     otherErrors++
                 }
                 if (otherErrors >= 5) {
@@ -161,7 +247,10 @@ class MainActivity : FlutterActivity() {
                     send("fatal", "O reconhecedor local falhou repetidamente (código $error). " +
                         "Verifique os idiomas offline no aparelho e reinicie a sessão.")
                 } else {
-                    scheduleRetry(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1100L else 550L)
+                    val delay = if (silent) silenceRetryDelay()
+                        else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 2300L
+                        else 1200L
+                    scheduleRetry(delay)
                 }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -173,6 +262,9 @@ class MainActivity : FlutterActivity() {
         })
         active = true
         otherErrors = 0
+        consecutiveSilence = 0
+        lastPartialAt = 0L
+        lastAudioLevelAt = 0L
         listenAgain()
     }
 
@@ -184,9 +276,17 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
-            if (Build.VERSION.SDK_INT >= 34) {
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            if (tvMode) {
+                // Preferir pausas moderadas entre as frases de videos.
+                // Extras sao sugestoes; servicos de voz podem ignora-las.
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
+            }
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !usingSystemRecognizer)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE,
+                if (languageMode == "en") "en-US" else "pt-BR")
+            if (Build.VERSION.SDK_INT >= 34 && languageMode == "auto") {
                 putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
                 putStringArrayListExtra(
                     RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES,
@@ -215,17 +315,24 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun scheduleRetry(delay: Long = 550L) {
+    private fun silenceRetryDelay(): Long {
+        // Retomadas muito frequentes podem esgotar bateria e causar ERROR_TOO_MANY_REQUESTS.
+        val base = if (economyMode) 1800L else 950L
+        return (base + consecutiveSilence.coerceAtMost(6) * 650L).coerceAtMost(6500L)
+    }
+
+    private fun scheduleRetry(delay: Long = 1200L) {
         handler.removeCallbacks(retryRunnable)
         if (active && !pendingTranslation) handler.postDelayed(retryRunnable, delay)
     }
 
     private fun send(type: String, message: String? = null, text: String? = null,
-                     language: String? = null) {
+                     language: String? = null, level: Float? = null) {
         val payload = mutableMapOf<String, Any>("type" to type)
         if (message != null) payload["message"] = message
         if (text != null) payload["text"] = text
         if (language != null) payload["language"] = language
+        if (level != null) payload["level"] = level.toDouble()
         handler.post { sink?.success(payload) }
     }
 
@@ -233,10 +340,12 @@ class MainActivity : FlutterActivity() {
         active = false
         listening = false
         pendingTranslation = false
+        consecutiveSilence = 0
         handler.removeCallbacks(retryRunnable)
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+        usingSystemRecognizer = false
     }
 
     override fun onPause() {
