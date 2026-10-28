@@ -39,6 +39,8 @@ class MainActivity : FlutterActivity() {
     private var usingSystemRecognizer = false
     private var otherErrors = 0
     private var economyMode = true
+    private var tvMode = false
+    private var lastAudioLevelAt = 0L
     private var consecutiveSilence = 0
     private var lastPartialAt = 0L
 
@@ -75,6 +77,7 @@ class MainActivity : FlutterActivity() {
                     }
                     "start" -> {
                         economyMode = call.argument<Boolean>("economyMode") ?: true
+                        tvMode = call.argument<Boolean>("tvMode") ?: false
                         languageMode = call.argument<String>("languageMode")
                             ?.takeIf { it == "en" || it == "pt" } ?: "auto"
                         allowSystemRecognition = call.argument<Boolean>("allowSystemRecognition") ?: false
@@ -162,14 +165,24 @@ class MainActivity : FlutterActivity() {
         recognizer!!.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 otherErrors = 0
-                send("status", "Ouvindo português e inglês…")
+                send("status", if (tvMode) "TV: aguardando fala em ingles…" else "Microfone pronto para ouvir…")
             }
             override fun onBeginningOfSpeech() {
                 consecutiveSilence = 0
+                if (tvMode) send("status", "TV: fala detectada, transcrevendo ingles…")
             }
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) {
+                if (!tvMode || !active || pendingTranslation) return
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastAudioLevelAt < 350L) return
+                lastAudioLevelAt = now
+                // onRmsChanged e opcional e NAO mede volume calibrado da TV.
+                send("audioLevel", level = rmsdB.coerceIn(-2.0f, 12.0f))
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                if (tvMode) send("status", "TV: trecho captado; processando legenda…")
+            }
             override fun onPartialResults(partialResults: Bundle?) {
                 val phrase = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.trim()
@@ -221,6 +234,10 @@ class MainActivity : FlutterActivity() {
                     error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 if (silent) {
                     consecutiveSilence++
+                    if (tvMode && consecutiveSilence % 3 == 0) {
+                        send("status", "TV: audio presente, mas nenhuma frase foi reconhecida. "
+                            + "Confira idioma English e aproxime o celular da caixa de som.")
+                    }
                 } else {
                     consecutiveSilence = 0
                     otherErrors++
@@ -247,6 +264,7 @@ class MainActivity : FlutterActivity() {
         otherErrors = 0
         consecutiveSilence = 0
         lastPartialAt = 0L
+        lastAudioLevelAt = 0L
         listenAgain()
     }
 
@@ -258,6 +276,13 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            if (tvMode) {
+                // Preferir pausas moderadas entre as frases de videos.
+                // Extras sao sugestoes; servicos de voz podem ignora-las.
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
+            }
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !usingSystemRecognizer)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE,
                 if (languageMode == "en") "en-US" else "pt-BR")
@@ -302,11 +327,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun send(type: String, message: String? = null, text: String? = null,
-                     language: String? = null) {
+                     language: String? = null, level: Float? = null) {
         val payload = mutableMapOf<String, Any>("type" to type)
         if (message != null) payload["message"] = message
         if (text != null) payload["text"] = text
         if (language != null) payload["language"] = language
+        if (level != null) payload["level"] = level.toDouble()
         handler.post { sink?.success(payload) }
     }
 
