@@ -52,3 +52,40 @@ List<WorkPhrase> findWorkPhrases(String query, {String category = 'Todos'}) {
         phrase.category.toLowerCase().contains(term);
   }).toList(growable: false);
 }
+
+class MatchedWorkPhrase {
+  const MatchedWorkPhrase({required this.phrase, required this.inEnglish});
+  final WorkPhrase phrase;
+  final bool inEnglish;
+}
+
+String _normalizeSpoken(String text) {
+  var normalized = text.toLowerCase().trim();
+  const accents = <String, String>{
+    'á':'a','à':'a','â':'a','ã':'a','é':'e','ê':'e','í':'i',
+    'ó':'o','ô':'o','õ':'o','ú':'u','ü':'u','ç':'c',
+  };
+  for (final entry in accents.entries) {
+    normalized = normalized.replaceAll(entry.key, entry.value);
+  }
+  return normalized
+      .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+/// Somente correspondencia exata para evitar traducoes inventadas, sobretudo
+/// em instrucoes de seguranca. Nao e um tradutor de texto livre.
+MatchedWorkPhrase? matchSpokenWorkPhrase(String recognized) {
+  final normalized = _normalizeSpoken(recognized);
+  if (normalized.isEmpty) return null;
+  for (final phrase in workPhrases) {
+    if (_normalizeSpoken(phrase.pt) == normalized) {
+      return MatchedWorkPhrase(phrase: phrase, inEnglish: false);
+    }
+    if (_normalizeSpoken(phrase.en) == normalized) {
+      return MatchedWorkPhrase(phrase: phrase, inEnglish: true);
+    }
+  }
+  return null;
+}
