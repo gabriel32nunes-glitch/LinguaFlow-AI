@@ -116,7 +116,7 @@ class TranslationController extends ChangeNotifier {
     status = 'Verificando suporte de voz local do Samsung…';
     _update();
     try {
-      final raw = await _speech.invokeMethod<dynamic>('checkSupport')
+      final raw = await _speech.invokeMethod<dynamic>('checkSupport', {'languageMode': languageMode})
           .timeout(const Duration(seconds: 10));
       if (raw is! Map) {
         throw StateError('O Android não respondeu à verificação de áudio.');
