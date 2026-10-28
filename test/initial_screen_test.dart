@@ -17,5 +17,6 @@ void main() {
     expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
     // O interruptor de economia fica abaixo da dobra da lista lazy;
-    // a politica de economia e verificada em device_profile_test.dart.\n  });
+    // a politica de economia e verificada em device_profile_test.dart.
+  });
 }
