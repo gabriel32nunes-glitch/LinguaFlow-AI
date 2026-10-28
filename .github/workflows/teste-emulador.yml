@@ -37,6 +37,14 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Incluir Whisper multilingue no APK
+        run: |
+          mkdir -p assets/models
+          curl -fL --retry 3 --connect-timeout 20 --max-time 300 \
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/f281eb45af861ab5e5297d23694b7d46e090c02c/ggml-tiny-q5_1.bin' \
+            -o assets/models/ggml-tiny-q5_1.bin
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  assets/models/ggml-tiny-q5_1.bin' | sha256sum -c -
+
       - name: Preparar projeto Android
         run: |
           flutter create . --platforms android
@@ -70,7 +78,7 @@ jobs:
       - name: Publicar APK experimental apenas apos os testes
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaFlow-V07-Android-${{ matrix.api }}-APK-EXPERIMENTAL
+          name: LinguaFlow-V09-Android-${{ matrix.api }}-APK-EXPERIMENTAL
           path: build/app/outputs/flutter-apk/app-debug.apk
 
       - name: Publicar logs e captura de tela do emulador
