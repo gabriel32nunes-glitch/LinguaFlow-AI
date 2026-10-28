@@ -44,20 +44,22 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, reply ->
                 when (call.method) {
                     "checkSupport" -> {
-                        val reason = checkSupport()
+                        val mode = call.argument<String>("languageMode")
+                            ?.takeIf { it == "en" || it == "pt" } ?: "auto"
+                        val reason = checkSupport(mode)
                         reply.success(mapOf(
                             "supported" to (reason == null),
                             "message" to (reason ?: "Pronto para áudio no próprio dispositivo")
                         ))
                     }
                     "start" -> {
-                        val reason = checkSupport()
+                        languageMode = call.argument<String>("languageMode")
+                            ?.takeIf { it == "en" || it == "pt" } ?: "auto"
+                        val reason = checkSupport(languageMode)
                         if (reason != null) {
                             reply.error("UNSUPPORTED", reason, null)
                         } else {
                             try {
-                                languageMode = call.argument<String>("languageMode")
-                                    ?.takeIf { it == "en" || it == "pt" } ?: "auto"
                                 startSession()
                                 reply.success(null)
                             } catch (e: Exception) {
@@ -92,8 +94,8 @@ class MainActivity : FlutterActivity() {
             })
     }
 
-    private fun checkSupport(): String? {
-        if (Build.VERSION.SDK_INT < 34) {
+    private fun checkSupport(mode: String = languageMode): String? {
+        if (Build.VERSION.SDK_INT < 34 && mode == "auto") {
             return "Para detectar e alternar português/inglês automaticamente nesta versão, " +
                 "é necessário Android 14 ou superior. Nenhum serviço pago será usado."
         }
