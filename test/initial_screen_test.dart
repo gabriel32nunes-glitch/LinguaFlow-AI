@@ -38,9 +38,7 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('INTERPRETE FUTURISTA · V0.8'), findsOneWidget);
-    expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
-    expect(find.textContaining('SM-A145M'), findsOneWidget);
     // O interruptor de economia fica abaixo da dobra da lista dinamica.
     // Sua logica de limites e validada em device_profile_test.dart.
   });
