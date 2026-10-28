@@ -11,6 +11,7 @@ import 'language_direction.dart';
 import 'device_profile.dart';
 import 'voice_aura.dart';
 import 'language_library.dart';
+import 'local_whisper_voice.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -83,6 +84,11 @@ class TranslationController extends ChangeNotifier {
   DeviceProfile? deviceProfile;
   String deviceStatus = 'Detectando versao Android e memoria…';
   String? deviceNotice;
+  final LocalWhisperVoice _whisper = LocalWhisperVoice();
+  final WhisperTranscriptDelta _whisperDelta = WhisperTranscriptDelta();
+  Timer? _whisperTicker;
+  bool useWhisper = true;
+  bool autoDetectSpeech = true;
   final List<TranslationTurn> history = [];
   final Map<String, PackState> languagePacks = {
     for (final language in linguaLanguages)
@@ -120,7 +126,12 @@ class TranslationController extends ChangeNotifier {
         economyMode = true;
       }
       final safeMode = profile.safeLanguageMode(languageMode);
-      if (safeMode != languageMode) {
+      if (useWhisper) {
+        // Whisper vem no APK e nao depende da versao Android nem do servico
+        // de reconhecimento do Samsung.
+        deviceNotice = 'Motor Whisper local incluído no aplicativo; '
+            'nenhuma instalação de voz do Samsung é necessária.';
+      } else if (safeMode != languageMode) {
         languageMode = safeMode;
         deviceNotice = 'Este Android nao permite solicitar alternancia automatica PT/EN. '
             'Inicie em Portugues e selecione English quando necessario. '
@@ -144,6 +155,12 @@ class TranslationController extends ChangeNotifier {
     } finally {
       _update();
     }
+  }
+
+  void setAutoDetectSpeech(bool value) {
+    if (running || busy) return;
+    autoDetectSpeech = value;
+    _update();
   }
 
   void selectSource(String code) {
@@ -360,6 +377,20 @@ class TranslationController extends ChangeNotifier {
         ? 'Configurando microfone para escutar a televisao em ingles…'
         : 'Verificando suporte de voz local do Samsung…';
     _update();
+    if (useWhisper) {
+      try {
+        await _startWhisper(microphoneOnly: microphoneOnly);
+      } catch (e) {
+        status = 'Não foi possível iniciar o motor de voz integrado';
+        warning = 'Falha no mecanismo local do aplicativo: $e';
+        running = false;
+        await _whisper.stop();
+      } finally {
+        busy = false;
+        _update();
+      }
+      return;
+    }
     try {
       if (deviceProfile == null) {
         await inspectDevice();
@@ -452,6 +483,69 @@ class TranslationController extends ChangeNotifier {
       busy = false;
       _update();
     }
+  }
+
+  Future<void> _startWhisper({required bool microphoneOnly}) async {
+    final permission = await Permission.microphone.request()
+        .timeout(const Duration(seconds: 20));
+    if (!permission.isGranted) {
+      throw StateError('Permissão do microfone necessária para ouvir.');
+    }
+    phraseOnly = false;
+    _whisperDelta.reset();
+    partial = '';
+    status = 'Carregando modelo de fala multilíngue incluído no aplicativo…';
+    _update();
+
+    // Pacotes de tradução são independentes do reconhecimento Whisper.
+    // Mesmo sem pacote, a transcrição local permanece disponível.
+    try {
+      await _verifyModels();
+    } catch (_) {
+      modelsReady = false;
+      modelsStatus = 'Legendas originais disponíveis; pacotes de tradução '
+          'são preparados na biblioteca do aplicativo.';
+    }
+    if (!microphoneOnly && audioEnabled) {
+      try {
+        await _initializeVoices().timeout(const Duration(seconds: 8));
+      } catch (_) {
+        _voices.clear();
+      }
+    }
+
+    // Não usar o SpeechRecognizer do sistema neste fluxo.
+    await _whisper.start(
+      language: tvMode ? 'en' : autoDetectSpeech ? 'auto' : selectedSource,
+      onPartial: (text) {
+        if (!running || _disposed) return;
+        _whisperDelta.observe(text);
+        partial = text;
+        status = tvMode
+            ? 'Vídeo/TV: transcrevendo inglês com Whisper local…'
+            : 'Reconhecendo idioma e fala no próprio telefone…';
+        _update();
+      },
+      onError: (message) {
+        warning = message;
+        _update();
+      },
+    );
+    running = true;
+    status = 'Motor de voz local ativo · 10 idiomas no catálogo';
+    _whisperTicker?.cancel();
+    _whisperTicker = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!running || _processing) return;
+      final delta = _whisperDelta.consume();
+      if (delta != null && delta.trim().length > 3) {
+        _processing = true;
+        unawaited(_handleFinal(<String,dynamic>{
+          'text': delta,
+          'language': tvMode ? 'en' : (autoDetectSpeech ? 'auto' : selectedSource),
+        }));
+      }
+    });
+    _update();
   }
 
   Future<bool> _verifyModels() async {
@@ -670,7 +764,7 @@ class TranslationController extends ChangeNotifier {
         _update();
         return;
       }
-      if (phraseOnly) {
+      if (phraseOnly && !useWhisper) {
         final match = matchSpokenWorkPhrase(text);
         if (match == null) {
           status = 'Frase fora do catalogo offline';
@@ -695,30 +789,76 @@ class TranslationController extends ChangeNotifier {
       _update();
 
       String language = event['language']?.toString() ?? '';
-      if (languageMode == 'auto' &&
-          resolveSourceLanguage(mode: 'auto', detectedTag: language) == null) {
-        language = await _languageId.identifyLanguage(text)
-            .timeout(const Duration(seconds: 8));
+      if (useWhisper) {
+        if (language == 'auto' || language.isEmpty) {
+          language = await _languageId.identifyLanguage(text)
+              .timeout(const Duration(seconds: 8));
+        }
+        final source = getLinguaLanguage(language);
+        final target = getLinguaLanguage(selectedTarget);
+        if (source == null || target == null) {
+          status = 'Idioma detectado fora do catálogo; transcrição disponível.';
+          _update();
+          return;
+        }
+        if (source.code == target.code) {
+          status = 'Fala transcrita em ${source.name}.';
+          _update();
+          return;
+        }
+        final sourceAvailable = await _models.isModelDownloaded(
+          source.translateCode.bcpCode).timeout(const Duration(seconds: 8));
+        final targetAvailable = await _models.isModelDownloaded(
+          target.translateCode.bcpCode).timeout(const Duration(seconds: 8));
+        if (!sourceAvailable || !targetAvailable) {
+          languagePacks[source.code] = sourceAvailable
+              ? PackState.installed : PackState.absent;
+          languagePacks[target.code] = targetAvailable
+              ? PackState.installed : PackState.absent;
+          status = 'Legenda transcrita. Tradução para ${target.name} '
+              'necessita do pacote de idiomas no aplicativo.';
+          _update();
+          return;
+        }
+        final translator = OnDeviceTranslator(
+          sourceLanguage: source.translateCode,
+          targetLanguage: target.translateCode,
+        );
+        try {
+          status = 'Traduzindo ${source.name} para ${target.name}…';
+          _update();
+          final translated = await translator.translateText(text)
+              .timeout(const Duration(seconds: 25));
+          if (!running) return;
+          await _displayAndSpeak(sourceText: text, translation: translated,
+              fromEnglish: source.code != 'pt');
+        } finally {
+          translator.close();
+        }
+      } else {
+        if (languageMode == 'auto' &&
+            resolveSourceLanguage(mode: 'auto', detectedTag: language) == null) {
+          language = await _languageId.identifyLanguage(text)
+              .timeout(const Duration(seconds: 8));
+        }
+        final source = resolveSourceLanguage(
+          mode: languageMode, detectedTag: language,
+        );
+        if (source == null) {
+          warning = 'Não foi possível identificar o idioma falado.';
+          return;
+        }
+        final isEnglish = source == SourceLanguage.english;
+        status = isEnglish ? 'Traduzindo para português…' : 'Traduzindo para inglês…';
+        _update();
+        final translation = isEnglish
+            ? await _enToPt.translateText(text).timeout(const Duration(seconds: 20))
+            : await _ptToEn.translateText(text).timeout(const Duration(seconds: 20));
+        if (!running) return;
+        await _displayAndSpeak(
+          sourceText: text, translation: translation, fromEnglish: isEnglish,
+        );
       }
-      final source = resolveSourceLanguage(
-        mode: languageMode, detectedTag: language,
-      );
-      if (source == null) {
-        warning = 'Idioma nao identificado; nenhuma traducao foi inventada. '
-            'Use Portugues ou English no seletor manual se necessario.';
-        return;
-      }
-      final isEnglish = source == SourceLanguage.english;
-
-      status = isEnglish ? 'Traduzindo para português…' : 'Traduzindo para inglês…';
-      _update();
-      final translation = isEnglish
-          ? await _enToPt.translateText(text).timeout(const Duration(seconds: 20))
-          : await _ptToEn.translateText(text).timeout(const Duration(seconds: 20));
-      if (!running) return;
-      await _displayAndSpeak(
-        sourceText: text, translation: translation, fromEnglish: isEnglish,
-      );
     } catch (e) {
       warning = 'Falha ao traduzir/reproduzir: $e';
     } finally {
@@ -729,7 +869,7 @@ class TranslationController extends ChangeNotifier {
         await Future<void>.delayed(const Duration(milliseconds: 450));
         if (running) {
           try {
-            await _speech.invokeMethod<void>('resume');
+            if (!useWhisper) await _speech.invokeMethod<void>('resume');
             status = tvMode
                 ? 'TV: ouvindo proxima frase em ingles…'
                 : 'Ouvindo português e inglês…';
@@ -800,7 +940,10 @@ class TranslationController extends ChangeNotifier {
     tvAudioLevelDb = null;
     _update();
     try {
-      await _speech.invokeMethod<void>('stop');
+      _whisperTicker?.cancel();
+      _whisperTicker = null;
+      await _whisper.stop();
+      if (!useWhisper) await _speech.invokeMethod<void>('stop');
       await _tts.stop();
       await _events?.cancel();
       _events = null;
@@ -814,7 +957,9 @@ class TranslationController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     running = false;
-    unawaited(_speech.invokeMethod<void>('stop'));
+    _whisperTicker?.cancel();
+    unawaited(_whisper.dispose());
+    if (!useWhisper) unawaited(_speech.invokeMethod<void>('stop'));
     unawaited(_tts.stop());
     unawaited(_events?.cancel() ?? Future<void>.value());
     _enToPt.close();
