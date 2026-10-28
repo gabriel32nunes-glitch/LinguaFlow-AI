@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private var listening = false
     private var pendingTranslation = false
     private var detectedLanguage: String? = null
+    private var languageMode = "auto"
     private var otherErrors = 0
 
     private val retryRunnable = Runnable {
@@ -55,6 +56,8 @@ class MainActivity : FlutterActivity() {
                             reply.error("UNSUPPORTED", reason, null)
                         } else {
                             try {
+                                languageMode = call.argument<String>("languageMode")
+                                    ?.takeIf { it == "en" || it == "pt" } ?: "auto"
                                 startSession()
                                 reply.success(null)
                             } catch (e: Exception) {
@@ -136,7 +139,12 @@ class MainActivity : FlutterActivity() {
                     pendingTranslation = false
                     scheduleRetry()
                 } else {
-                    send("result", text = phrase, language = detectedLanguage)
+                    val actualLanguage = when (languageMode) {
+                        "pt" -> "pt-BR"
+                        "en" -> "en-US"
+                        else -> detectedLanguage
+                    }
+                    send("result", text = phrase, language = actualLanguage)
                 }
             }
             override fun onError(error: Int) {
@@ -185,8 +193,9 @@ class MainActivity : FlutterActivity() {
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
-            if (Build.VERSION.SDK_INT >= 34) {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE,
+                if (languageMode == "en") "en-US" else "pt-BR")
+            if (Build.VERSION.SDK_INT >= 34 && languageMode == "auto") {
                 putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
                 putStringArrayListExtra(
                     RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES,
