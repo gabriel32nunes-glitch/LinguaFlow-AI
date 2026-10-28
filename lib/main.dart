@@ -761,7 +761,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 border: Border.all(color: const Color(0xFF25425B)),
               ),
               child: Column(children: [
-                const Text('INTERPRETE FUTURISTA · V0.7',
+                const Text('INTERPRETE FUTURISTA · V0.8',
                     style: TextStyle(
                       fontSize: 10, letterSpacing: 2.2,
                       fontWeight: FontWeight.w800,
