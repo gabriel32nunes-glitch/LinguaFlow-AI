@@ -35,6 +35,14 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Incluir Whisper multilingue no APK
+        run: |
+          mkdir -p assets/models
+          curl -fL --retry 3 --connect-timeout 20 --max-time 300 \
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/f281eb45af861ab5e5297d23694b7d46e090c02c/ggml-tiny-q5_1.bin' \
+            -o assets/models/ggml-tiny-q5_1.bin
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  assets/models/ggml-tiny-q5_1.bin' | sha256sum -c -
+
       - name: Preparar app Android
         run: |
           flutter create . --platforms android
@@ -57,6 +65,6 @@ jobs:
       - name: Disponibilizar APK ARM64
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaFlow-V08-A14-ARM64-MODO-TV-APK
+          name: LinguaFlow-V09-A14-ARM64-WHISPER-10-IDIOMAS
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
