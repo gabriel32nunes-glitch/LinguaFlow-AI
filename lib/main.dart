@@ -671,15 +671,14 @@ class _TranslationPageState extends State<TranslationPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        title: const Row(children: [
-          Icon(Icons.hub_rounded, color: Color(0xFF58F1D0), size: 25),
-          SizedBox(width: 9),
-          Text('LINGUA', style: TextStyle(
-              fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
-          Text('FLOW', style: TextStyle(
-              fontSize: 18, color: Color(0xFF58F1D0),
-              fontWeight: FontWeight.w900, letterSpacing: 1.0)),
-        ]),
+        title: const Text('LINGUAFLOW',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 16, fontWeight: FontWeight.w900,
+            color: Color(0xFF58F1D0), letterSpacing: 0.4,
+          ),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
