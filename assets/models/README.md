@@ -1,0 +1,1 @@
+O workflow baixa ggml-tiny-q5_1.bin (modelo Whisper multilíngue compacto), verifica SHA256 e empacota como Flutter asset. Este diretório não contém gravações nem chave de API. Não substitua o modelo sem verificar licença, SHA e compatibilidade.
