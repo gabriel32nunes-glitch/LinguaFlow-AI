@@ -13,7 +13,7 @@ void main() {
 
     await tester.pumpWidget(const LinguaFlowApp());
 
-    expect(find.textContaining('VERSÃO 0.4'), findsOneWidget);
+    expect(find.textContaining('VERSÃO 0.5'), findsOneWidget);
     expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
   });
