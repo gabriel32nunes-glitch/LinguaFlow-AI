@@ -7,6 +7,7 @@ void main() {
   test('Modo TV seleciona ingles e evita eco por voz sintetizada', () {
     final controller = TranslationController();
     expect(controller.languageMode, 'auto');
+    controller.setAudioEnabled(true);
     expect(controller.audioEnabled, isTrue);
     controller.setTvMode(true);
     expect(controller.tvMode, isTrue);
