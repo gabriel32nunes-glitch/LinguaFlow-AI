@@ -70,7 +70,7 @@ jobs:
       - name: Publicar APK experimental apenas apos os testes
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaFlow-V06-Android-${{ matrix.api }}-APK-EXPERIMENTAL
+          name: LinguaFlow-V07-Android-${{ matrix.api }}-APK-EXPERIMENTAL
           path: build/app/outputs/flutter-apk/app-debug.apk
 
       - name: Publicar logs e captura de tela do emulador
