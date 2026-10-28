@@ -7,12 +7,17 @@ on:
         description: 'Versao publica X.Y.Z (exemplo 1.0.0)'
         type: string
         required: true
+  push:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   publicar:
+    # Para a primeira versao oficial, o merge deve conter [publish-release].
+    # Pushes comuns de codigo nunca publicam sem autorizacao explicita.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish-release]')
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
@@ -22,7 +27,7 @@ jobs:
       LINGUAFLOW_KEY_ALIAS: ${{ secrets.LINGUAFLOW_KEY_ALIAS }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.LINGUAFLOW_KEYSTORE_BASE64 }}
       GH_TOKEN: ${{ github.token }}
-      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ inputs.version || '0.9.0' }}
     steps:
       - name: Verificar versao e configuracao de assinatura
         shell: bash
