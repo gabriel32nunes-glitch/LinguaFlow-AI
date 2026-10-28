@@ -1,12 +1,15 @@
 package com.example.linguaflow_ai
 
 import android.Manifest
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -33,6 +36,9 @@ class MainActivity : FlutterActivity() {
     private var detectedLanguage: String? = null
     private var languageMode = "auto"
     private var otherErrors = 0
+    private var economyMode = true
+    private var consecutiveSilence = 0
+    private var lastPartialAt = 0L
 
     private val retryRunnable = Runnable {
         if (active && !pendingTranslation && !listening) listenAgain()
@@ -43,6 +49,17 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodName)
             .setMethodCallHandler { call, reply ->
                 when (call.method) {
+                    "deviceInfo" -> {
+                        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        reply.success(mapOf(
+                            "sdkInt" to Build.VERSION.SDK_INT,
+                            "model" to Build.MODEL,
+                            "manufacturer" to Build.MANUFACTURER,
+                            "memoryClassMb" to manager.memoryClass,
+                            "lowRamDevice" to manager.isLowRamDevice,
+                            "onDeviceSpeechAvailable" to SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+                        ))
+                    }
                     "checkSupport" -> {
                         val mode = call.argument<String>("languageMode")
                             ?.takeIf { it == "en" || it == "pt" } ?: "auto"
@@ -53,6 +70,7 @@ class MainActivity : FlutterActivity() {
                         ))
                     }
                     "start" -> {
+                        economyMode = call.argument<Boolean>("economyMode") ?: true
                         languageMode = call.argument<String>("languageMode")
                             ?.takeIf { it == "en" || it == "pt" } ?: "auto"
                         val reason = checkSupport(languageMode)
@@ -123,14 +141,21 @@ class MainActivity : FlutterActivity() {
                 otherErrors = 0
                 send("status", "Ouvindo português e inglês…")
             }
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                consecutiveSilence = 0
+            }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onPartialResults(partialResults: Bundle?) {
                 val phrase = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.trim()
-                if (!phrase.isNullOrEmpty()) send("partial", text = phrase)
+                val now = SystemClock.elapsedRealtime()
+                val interval = if (economyMode) 800L else 350L
+                if (!phrase.isNullOrEmpty() && now - lastPartialAt >= interval) {
+                    lastPartialAt = now
+                    send("partial", text = phrase.take(240))
+                }
             }
             override fun onResults(results: Bundle?) {
                 listening = false
@@ -139,8 +164,10 @@ class MainActivity : FlutterActivity() {
                     ?.firstOrNull()?.trim()
                 if (phrase.isNullOrEmpty()) {
                     pendingTranslation = false
-                    scheduleRetry()
+                    consecutiveSilence++
+                    scheduleRetry(silenceRetryDelay())
                 } else {
+                    consecutiveSilence = 0
                     val actualLanguage = when (languageMode) {
                         "pt" -> "pt-BR"
                         "en" -> "en-US"
@@ -161,9 +188,18 @@ class MainActivity : FlutterActivity() {
                     return
                 }
                 pendingTranslation = false
-                // NO_MATCH and SPEECH_TIMEOUT often happen in silence; retry normally.
-                if (error != SpeechRecognizer.ERROR_NO_MATCH &&
-                    error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                if (error == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS) {
+                    active = false
+                    send("fatal", "O Android limitou tentativas excessivas de escuta (erro $error). " +
+                        "Aguarde antes de iniciar outra sessao.")
+                    return
+                }
+                val silent = error == SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                if (silent) {
+                    consecutiveSilence++
+                } else {
+                    consecutiveSilence = 0
                     otherErrors++
                 }
                 if (otherErrors >= 5) {
@@ -171,7 +207,10 @@ class MainActivity : FlutterActivity() {
                     send("fatal", "O reconhecedor local falhou repetidamente (código $error). " +
                         "Verifique os idiomas offline no aparelho e reinicie a sessão.")
                 } else {
-                    scheduleRetry(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1100L else 550L)
+                    val delay = if (silent) silenceRetryDelay()
+                        else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 2300L
+                        else 1200L
+                    scheduleRetry(delay)
                 }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -183,6 +222,8 @@ class MainActivity : FlutterActivity() {
         })
         active = true
         otherErrors = 0
+        consecutiveSilence = 0
+        lastPartialAt = 0L
         listenAgain()
     }
 
@@ -226,7 +267,13 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun scheduleRetry(delay: Long = 550L) {
+    private fun silenceRetryDelay(): Long {
+        // Retomadas muito frequentes podem esgotar bateria e causar ERROR_TOO_MANY_REQUESTS.
+        val base = if (economyMode) 1800L else 950L
+        return (base + consecutiveSilence.coerceAtMost(6) * 650L).coerceAtMost(6500L)
+    }
+
+    private fun scheduleRetry(delay: Long = 1200L) {
         handler.removeCallbacks(retryRunnable)
         if (active && !pendingTranslation) handler.postDelayed(retryRunnable, delay)
     }
@@ -244,6 +291,7 @@ class MainActivity : FlutterActivity() {
         active = false
         listening = false
         pendingTranslation = false
+        consecutiveSilence = 0
         handler.removeCallbacks(retryRunnable)
         recognizer?.cancel()
         recognizer?.destroy()
