@@ -8,6 +8,7 @@ class DeviceProfile {
     required this.lowRamDevice,
     required this.memoryClassMb,
     required this.onDeviceSpeechAvailable,
+    this.systemSpeechAvailable = false,
   });
 
   final int sdkInt;
@@ -16,6 +17,7 @@ class DeviceProfile {
   final bool lowRamDevice;
   final int memoryClassMb;
   final bool onDeviceSpeechAvailable;
+  final bool systemSpeechAvailable;
 
   factory DeviceProfile.fromPlatform(Map<dynamic, dynamic> info) {
     int number(dynamic value) => value is num ? value.toInt() : 0;
@@ -26,6 +28,7 @@ class DeviceProfile {
       lowRamDevice: info['lowRamDevice'] == true,
       memoryClassMb: number(info['memoryClassMb']),
       onDeviceSpeechAvailable: info['onDeviceSpeechAvailable'] == true,
+      systemSpeechAvailable: info['systemSpeechAvailable'] == true,
     );
   }
 
