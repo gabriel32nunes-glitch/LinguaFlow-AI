@@ -16,6 +16,6 @@ void main() {
     expect(find.textContaining('VERSÃO 0.6'), findsOneWidget);
     expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
-    expect(find.textContaining('Modo econômico Galaxy A14 4G'), findsOneWidget);
-  });
+    // O interruptor de economia fica abaixo da dobra da lista lazy;
+    // a politica de economia e verificada em device_profile_test.dart.\n  });
 }
