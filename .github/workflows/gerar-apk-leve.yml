@@ -53,6 +53,12 @@ jobs:
       - name: Testes automatizados
         run: flutter test
 
+      - name: Aceitar licencas Android e preparar NDK Whisper
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install 'ndk;29.0.13113456'
+
       - name: Gerar APK compacto ARM64
         run: flutter build apk --release --target-platform android-arm64
 
