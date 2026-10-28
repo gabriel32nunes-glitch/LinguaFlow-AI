@@ -37,7 +37,7 @@ void main() {
     await tester.pumpWidget(const LinguaFlowApp());
     await tester.pump();
 
-    expect(find.textContaining('INTERPRETE FUTURISTA · V0.8'), findsOneWidget);
+    expect(find.textContaining('INTERPRETE FUTURISTA · V0.9'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
     // O interruptor de economia fica abaixo da dobra da lista dinamica.
     // Sua logica de limites e validada em device_profile_test.dart.
