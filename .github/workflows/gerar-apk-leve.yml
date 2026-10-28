@@ -1,0 +1,58 @@
+name: APK leve LinguaFlow Galaxy A14 ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/android-emulator-smoke
+    paths:
+      - .github/workflows/gerar-apk-leve.yml
+
+permissions:
+  contents: read
+
+jobs:
+  apk-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Preparar app Android
+        run: |
+          flutter create . --platforms android
+          python3 setup_android.py
+          flutter pub get
+          rm -f test/widget_test.dart
+
+      - name: Testes automatizados
+        run: flutter test
+
+      - name: Gerar APK compacto ARM64
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Validar artefato
+        run: |
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+          sha256sum build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Disponibilizar APK ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaFlow-V07-A14-ARM64-APK-COMPACTO
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
