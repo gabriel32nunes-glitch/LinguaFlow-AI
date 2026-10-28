@@ -33,6 +33,8 @@ jobs:
           flutter create . --platforms android
           python3 setup_android.py
           flutter pub get
+          # flutter create gera um teste de exemplo para MyApp, que nao existe aqui.
+          rm -f test/widget_test.dart
 
       - name: Testes Flutter
         run: flutter test
