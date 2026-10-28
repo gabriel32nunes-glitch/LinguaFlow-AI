@@ -7,6 +7,10 @@ on:
       - test/android-emulator-smoke
     paths:
       - .github/workflows/gerar-apk-leve.yml
+      - lib/**
+      - native_android/**
+      - test/**
+      - pubspec.yaml
 
 permissions:
   contents: read
@@ -53,6 +57,6 @@ jobs:
       - name: Disponibilizar APK ARM64
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaFlow-V07-A14-ARM64-APK-COMPACTO
+          name: LinguaFlow-V08-A14-ARM64-MODO-TV-APK
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
