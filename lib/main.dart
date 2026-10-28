@@ -56,6 +56,9 @@ class TranslationController extends ChangeNotifier {
   bool _processing = false;
   bool speaking = false;
   bool audioEnabled = true;
+  // O modelo é baixado uma vez. Não impomos Wi-Fi para evitar espera sem fim.
+  // Pode utilizar o plano de dados do celular na primeira instalação.
+  bool allowMobileDataForModels = true;
   String status = 'Pronto para iniciar';
   String partial = '';
   String portuguese = '';
@@ -69,6 +72,12 @@ class TranslationController extends ChangeNotifier {
 
   void setAudioEnabled(bool value) {
     audioEnabled = value;
+    _update();
+  }
+
+  void setAllowMobileDataForModels(bool value) {
+    if (busy || running) return;
+    allowMobileDataForModels = value;
     _update();
   }
 
@@ -92,7 +101,7 @@ class TranslationController extends ChangeNotifier {
         throw StateError('Autorize o microfone nas configurações do Android.');
       }
 
-      status = 'Preparando modelos de tradução locais…';
+      status = 'Verificando modelos de tradução instalados…';
       _update();
       await _downloadModels();
       await _initializeVoices();
@@ -128,16 +137,53 @@ class TranslationController extends ChangeNotifier {
   }
 
   Future<void> _downloadModels() async {
-    for (final code in <String>[
-      TranslateLanguage.english.bcpCode,
-      TranslateLanguage.portuguese.bcpCode,
-    ]) {
-      if (await _models.isModelDownloaded(code)) continue;
-      status = 'Baixando modelo de tradução ($code) — use Wi-Fi…';
-      _update();
-      final downloaded = await _models.downloadModel(code, isWifiRequired: true);
-      if (!downloaded || !await _models.isModelDownloaded(code)) {
-        throw StateError('Não foi possível baixar $code. Conecte ao Wi-Fi e tente novamente.');
+    final modelsToCheck = <(String, String)>[
+      (TranslateLanguage.english.bcpCode, 'inglês'),
+      (TranslateLanguage.portuguese.bcpCode, 'português'),
+    ];
+    for (final (code, label) in modelsToCheck) {
+      try {
+        status = 'Verificando modelo de $label ($code)…';
+        _update();
+        final alreadyInstalled = await _models.isModelDownloaded(code)
+            .timeout(const Duration(seconds: 15));
+        if (alreadyInstalled) continue;
+
+        var seconds = 0;
+        status = 'Baixando modelo de $label ($code) — primeira utilização…';
+        _update();
+        // O plugin não fornece porcentagem de progresso. Exibimos o tempo real.
+        final ticker = Timer.periodic(const Duration(seconds: 5), (_) {
+          seconds += 5;
+          status = 'Baixando modelo de $label ($code) — $seconds s. '
+              'Confira a internet; o modelo será usado offline depois.';
+          _update();
+        });
+        var downloaded = false;
+        try {
+          downloaded = await _models.downloadModel(
+            code,
+            isWifiRequired: !allowMobileDataForModels,
+          ).timeout(const Duration(minutes: 2));
+        } finally {
+          ticker.cancel();
+        }
+        if (!downloaded ||
+            !await _models.isModelDownloaded(code)
+                .timeout(const Duration(seconds: 15))) {
+          throw StateError('O arquivo do idioma não foi confirmado pelo Android.');
+        }
+        status = 'Modelo de $label pronto!';
+        _update();
+      } on TimeoutException {
+        throw StateError('O modelo de $label ($code) não terminou de baixar em até '
+            '2 minutos. Verifique a internet, desative VPN/DNS privado '
+            'se estiver usando, atualize o Google Play Services e tente de novo. '
+            'O download anterior pode continuar em segundo plano.');
+      } on PlatformException catch (error) {
+        throw StateError('Não foi possível obter o modelo de $label ($code): '
+            '${error.message ?? error.code}. Confira a internet, espaço livre e '
+            'Google Play Services.');
       }
     }
   }
@@ -404,6 +450,18 @@ class _TranslationPageState extends State<TranslationPage> {
               title: const Text('Falar tradução em voz alta'),
               subtitle: const Text('Somente vozes instaladas para uso offline'),
               contentPadding: EdgeInsets.zero,
+            ),
+            if (!running && !controller.busy) SwitchListTile.adaptive(
+              value: controller.allowMobileDataForModels,
+              onChanged: controller.setAllowMobileDataForModels,
+              title: const Text('Permitir baixar modelos com dados móveis'),
+              subtitle: const Text('Sem cobrança por API. O primeiro download usa internet '
+                  'e pode consumir a franquia de dados do celular.'),
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (controller.busy) const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: LinearProgressIndicator(),
             ),
             if (!running) CheckboxListTile(
               value: consent,
