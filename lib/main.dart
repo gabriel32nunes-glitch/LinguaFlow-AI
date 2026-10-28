@@ -74,6 +74,7 @@ class TranslationController extends ChangeNotifier {
   bool microphoneOnly = false;
   bool phraseOnly = false;
   bool economyMode = true;
+  bool allowSystemRecognition = false;
   String languageMode = 'auto';
   DeviceProfile? deviceProfile;
   String deviceStatus = 'Detectando versao Android e memoria…';
@@ -102,8 +103,8 @@ class TranslationController extends ChangeNotifier {
       final profile = DeviceProfile.fromPlatform(response);
       deviceProfile = profile;
       deviceStatus = '${profile.manufacturer} ${profile.model} · '
-          'Android API ${profile.sdkInt} · limite de memoria ${profile.memoryClassMb} MB '
-          '· voz local: ${profile.onDeviceSpeechAvailable ? 'disponivel' : 'indisponivel'}';
+          'Android API ${profile.sdkInt} · memoria ${profile.memoryClassMb} MB · '
+          'voz offline: ${profile.onDeviceSpeechAvailable ? 'sim' : 'nao'}';
       if (profile.isGalaxyA14FourG || profile.lowRamDevice) {
         economyMode = true;
       }
@@ -114,8 +115,12 @@ class TranslationController extends ChangeNotifier {
             'Inicie em Portugues e selecione English quando necessario. '
             'Sem toques por frase no mesmo idioma.';
       } else if (!profile.onDeviceSpeechAvailable) {
-        deviceNotice = 'Reconhecimento de voz estritamente offline nao esta disponivel '
-            'neste Android. Frases prontas escritas continuam utilizaveis.';
+        deviceNotice = profile.systemSpeechAvailable
+            ? 'A voz offline nao esta disponivel. Voce pode ativar o '
+                'servico de voz Android opcional; ele pode usar internet e '
+                'enviar audio ao provedor de reconhecimento.'
+            : 'Nao ha reconhecedor de voz Android instalado. '
+                'Frases escritas continuam disponiveis.';
       } else {
         deviceNotice = null;
       }
@@ -128,6 +133,12 @@ class TranslationController extends ChangeNotifier {
     } finally {
       _update();
     }
+  }
+
+  void setAllowSystemRecognition(bool enabled) {
+    if (running || busy) return;
+    allowSystemRecognition = enabled;
+    _update();
   }
 
   void setEconomyMode(bool enabled) {
@@ -172,7 +183,10 @@ class TranslationController extends ChangeNotifier {
       if (deviceProfile == null) {
         await inspectDevice();
       }
-      final raw = await _speech.invokeMethod<dynamic>('checkSupport', {'languageMode': languageMode})
+      final raw = await _speech.invokeMethod<dynamic>('checkSupport', {
+        'languageMode': languageMode,
+        'allowSystemRecognition': allowSystemRecognition,
+      })
           .timeout(const Duration(seconds: 10));
       if (raw is! Map) {
         throw StateError('O Android não respondeu à verificação de áudio.');
@@ -229,6 +243,7 @@ class TranslationController extends ChangeNotifier {
       await _speech.invokeMethod<void>('start', {
         'languageMode': languageMode,
         'economyMode': economyMode,
+        'allowSystemRecognition': allowSystemRecognition,
       })
           .timeout(const Duration(seconds: 15));
       running = true;
@@ -935,6 +950,17 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             const SizedBox(height: 14),
             SwitchListTile.adaptive(
+              value: controller.allowSystemRecognition,
+              onChanged: running || controller.busy
+                  ? null : controller.setAllowSystemRecognition,
+              title: const Text('Serviço de voz Android (opcional)'),
+              subtitle: const Text(
+                  'Se não houver voz offline, permite usar o reconhecedor do '
+                  'celular. Pode precisar de internet e enviar áudio ao '
+                  'serviço configurado. Sem API paga.'),
+              contentPadding: EdgeInsets.zero,
+            ),
+            SwitchListTile.adaptive(
               value: controller.economyMode,
               onChanged: running || controller.busy ? null : controller.setEconomyMode,
               title: const Text('Modo econômico Galaxy A14 4G'),
@@ -992,7 +1018,8 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ],
             const SizedBox(height: 18),
-            const Text('V0.7: efeitos de voz sao indicativos, nao representam volume real. '
+            const Text('V0.7: o serviço de voz Android alternativo só é usado com autorização '
+                'e pode transmitir áudio pela internet. Efeitos de voz não medem volume real. '
                 'O perfil A14 4G reduz tentativas e consumo. '
                 'Sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
                 'Fala livre ainda exige ML Kit. '
