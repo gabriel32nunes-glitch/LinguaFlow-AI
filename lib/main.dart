@@ -6,6 +6,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'work_phrases.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +31,13 @@ class LinguaFlowApp extends StatelessWidget {
         ),
         home: const TranslationPage(),
       );
+}
+
+class TranslationTurn {
+  const TranslationTurn({required this.source, required this.translation, required this.fromEnglish});
+  final String source;
+  final String translation;
+  final bool fromEnglish;
 }
 
 class TranslationController extends ChangeNotifier {
@@ -61,6 +69,8 @@ class TranslationController extends ChangeNotifier {
   bool allowMobileDataForModels = true;
   bool modelsReady = false;
   bool microphoneOnly = false;
+  String languageMode = 'auto';
+  final List<TranslationTurn> history = [];
   String modelsStatus = 'Modelos ainda não verificados';
   String status = 'Pronto para iniciar';
   String partial = '';
@@ -71,6 +81,18 @@ class TranslationController extends ChangeNotifier {
 
   void _update() {
     if (!_disposed) notifyListeners();
+  }
+
+  void setLanguageMode(String value) {
+    if (running || busy) return;
+    if (!['auto', 'pt', 'en'].contains(value)) return;
+    languageMode = value;
+    _update();
+  }
+
+  void clearHistory() {
+    history.clear();
+    _update();
   }
 
   void setAudioEnabled(bool value) {
@@ -133,7 +155,7 @@ class TranslationController extends ChangeNotifier {
           _update();
         },
       );
-      await _speech.invokeMethod<void>('start')
+      await _speech.invokeMethod<void>('start', {'languageMode': languageMode})
           .timeout(const Duration(seconds: 15));
       running = true;
       status = microphoneOnly
@@ -330,7 +352,9 @@ class TranslationController extends ChangeNotifier {
       status = 'Identificando idioma…';
       _update();
 
-      String language = event['language']?.toString().toLowerCase() ?? '';
+      String language = languageMode == 'auto'
+          ? (event['language']?.toString().toLowerCase() ?? '')
+          : languageMode;
       if (!language.startsWith('pt') && !language.startsWith('en')) {
         language = await _languageId.identifyLanguage(text);
       }
@@ -344,14 +368,18 @@ class TranslationController extends ChangeNotifier {
       status = isEnglish ? 'Traduzindo para português…' : 'Traduzindo para inglês…';
       _update();
       final translation = isEnglish
-          ? await _enToPt.translateText(text)
-          : await _ptToEn.translateText(text);
+          ? await _enToPt.translateText(text).timeout(const Duration(seconds: 20))
+          : await _ptToEn.translateText(text).timeout(const Duration(seconds: 20));
       if (!running) return;
       if (isEnglish) {
         portuguese = translation;
       } else {
         english = translation;
       }
+      history.insert(0, TranslationTurn(
+        source: text, translation: translation, fromEnglish: isEnglish,
+      ));
+      if (history.length > 12) history.removeLast();
       status = 'Tradução concluída';
       _update();
 
@@ -387,6 +415,51 @@ class TranslationController extends ChangeNotifier {
           }
         }
       }
+      _update();
+    }
+  }
+
+  /// Atalho totalmente offline: textos predefinidos nao dependem dos modelos ML Kit.
+  Future<void> playWorkPhrase(WorkPhrase phrase, {required bool inEnglish}) async {
+    if (running || busy) {
+      warning = 'Encerre a conversa antes de reproduzir uma frase pronta.';
+      _update();
+      return;
+    }
+    busy = true;
+    warning = null;
+    original = phrase.pt;
+    english = phrase.en;
+    portuguese = phrase.pt;
+    status = 'Frase pronta: sem modelo de traducao';
+    _update();
+    try {
+      await _initializeVoices().timeout(const Duration(seconds: 15));
+      final target = inEnglish ? 'en' : 'pt';
+      final voice = _voices[target];
+      if (voice == null) {
+        warning = 'Nao existe voz $target offline instalada no celular. '
+            'O texto continua disponivel para mostrar ou copiar.';
+        return;
+      }
+      await _tts.setLanguage(inEnglish ? 'en-US' : 'pt-BR');
+      await _tts.setVoice({
+        'name': voice['name'].toString(),
+        'locale': voice['locale'].toString(),
+      });
+      speaking = true;
+      status = inEnglish ? 'Falando em ingles…' : 'Falando em portugues…';
+      _update();
+      await _tts.speak(inEnglish ? phrase.en : phrase.pt)
+          .timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      warning = 'A voz offline nao respondeu em 30 segundos.';
+    } catch (e) {
+      warning = 'Nao foi possivel falar esta frase: $e';
+    } finally {
+      speaking = false;
+      busy = false;
+      status = 'Pronto para iniciar';
       _update();
     }
   }
@@ -434,6 +507,8 @@ class TranslationPage extends StatefulWidget {
 class _TranslationPageState extends State<TranslationPage> {
   final TranslationController controller = TranslationController();
   bool consent = false;
+  String phraseCategory = 'Todos';
+  String phraseQuery = '';
 
   @override
   void initState() {
@@ -489,7 +564,7 @@ class _TranslationPageState extends State<TranslationPage> {
             const Text('Conversa bilateral, sem botões por frase.',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, height: 1.15)),
             const SizedBox(height: 10),
-            const Text('VERSÃO 0.4 · DIAGNÓSTICO DE MODELOS',
+            const Text('VERSÃO 0.5 · TRABALHO OFFLINE',
                 style: TextStyle(color: Color(0xFF59DFBE),
                     fontSize: 13, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
@@ -531,6 +606,117 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ],
             const SizedBox(height: 14),
+            ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+              initiallyExpanded: true,
+              leading: const Icon(Icons.work_outline),
+              title: const Text('Frases profissionais sem download'),
+              subtitle: const Text('Disponiveis mesmo se o ML Kit falhar'),
+              children: [
+                const Text('Frases prontas nao sao traducao livre. '
+                    'Toque no alto-falante para falar pelo celular.',
+                    style: TextStyle(color: Color(0xFFB5C4D4), fontSize: 12)),
+                const SizedBox(height: 8),
+                TextField(
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Buscar em portugues ou ingles',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (value) => setState(() => phraseQuery = value),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 44,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final category in workCategories)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ChoiceChip(
+                            label: Text(category),
+                            selected: phraseCategory == category,
+                            onSelected: (_) => setState(() => phraseCategory = category),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 5),
+                for (final phrase in findWorkPhrases(
+                  phraseQuery, category: phraseCategory,
+                ).take(phraseQuery.trim().isEmpty && phraseCategory == 'Todos' ? 8 : 30))
+                  Card(
+                    color: phrase.priority
+                        ? const Color(0xFF422B32)
+                        : const Color(0xFF18263A),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(phrase.priority ? '⚠️ ${phrase.pt}' : phrase.pt,
+                              style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text(phrase.en,
+                              style: const TextStyle(color: Color(0xFFAAC2DF))),
+                          Wrap(spacing: 4, children: [
+                            TextButton.icon(
+                              onPressed: running || controller.busy
+                                  ? null : () => controller.playWorkPhrase(phrase, inEnglish: true),
+                              icon: const Icon(Icons.volume_up_outlined, size: 18),
+                              label: const Text('Falar inglês'),
+                            ),
+                            IconButton(
+                              tooltip: 'Copiar frase em inglês',
+                              onPressed: () => Clipboard.setData(ClipboardData(text: phrase.en)),
+                              icon: const Icon(Icons.copy_outlined, size: 19),
+                            ),
+                            IconButton(
+                              tooltip: 'Copiar frase em português',
+                              onPressed: () => Clipboard.setData(ClipboardData(text: phrase.pt)),
+                              icon: const Icon(Icons.content_copy, size: 19),
+                            ),
+                          ]),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (phraseQuery.trim().isEmpty && phraseCategory == 'Todos')
+                  const Text('Use a busca ou escolha uma categoria para ver todas.',
+                      style: TextStyle(color: Color(0xFFAAC2DF), fontSize: 12)),
+              ],
+            ),
+            ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: const Icon(Icons.history_outlined),
+              title: Text('Historico desta sessao (${controller.history.length})'),
+              subtitle: const Text('Somente na memoria; desaparece ao fechar o app'),
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: controller.history.isEmpty ? null : controller.clearHistory,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Limpar agora'),
+                  ),
+                ),
+                for (final turn in controller.history)
+                  ListTile(
+                    dense: true,
+                    title: Text(turn.source),
+                    subtitle: Text(turn.translation),
+                    trailing: IconButton(
+                      tooltip: 'Copiar traducao',
+                      icon: const Icon(Icons.copy),
+                      onPressed: () => Clipboard.setData(ClipboardData(text: turn.translation)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
             SwitchListTile.adaptive(
               value: controller.audioEnabled,
               onChanged: controller.setAudioEnabled,
@@ -548,6 +734,22 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             if (!running) ...[
               const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Idioma da pessoa que esta falando'),
+                subtitle: const Text('Automatico pode nao funcionar em todos os Samsung'),
+                trailing: DropdownButton<String>(
+                  value: controller.languageMode,
+                  items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('Auto PT/EN')),
+                    DropdownMenuItem(value: 'pt', child: Text('Portugues')),
+                    DropdownMenuItem(value: 'en', child: Text('English')),
+                  ],
+                  onChanged: controller.busy ? null : (value) {
+                    if (value != null) controller.setLanguageMode(value);
+                  },
+                ),
+              ),
               OutlinedButton.icon(
                 onPressed: controller.busy ? null : controller.checkModelStatus,
                 icon: const Icon(Icons.fact_check_outlined),
@@ -589,7 +791,7 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('V0.4: modelos não são baixados automaticamente ao iniciar a escuta. '
+            const Text('V0.5: frases prontas funcionam sem modelos; fala livre ainda exige ML Kit. '
                 'O teste de microfone funciona sem modelos. Tradução exige os pacotes PT/EN; Android 14+ '
                 'é necessário para troca de idioma no reconhecedor local. Mantenha a tela aberta; '
                 'não guarda gravações nem usa APIs pagas. Durante a voz traduzida '
