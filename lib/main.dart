@@ -68,7 +68,7 @@ class TranslationController extends ChangeNotifier {
   bool _disposed = false;
   bool _processing = false;
   bool speaking = false;
-  bool audioEnabled = true;
+  bool audioEnabled = false;
   // O modelo é baixado uma vez. Não impomos Wi-Fi para evitar espera sem fim.
   // Pode utilizar o plano de dados do celular na primeira instalação.
   bool allowMobileDataForModels = true;
@@ -532,7 +532,8 @@ class TranslationController extends ChangeNotifier {
       },
     );
     running = true;
-    status = 'Motor de voz local ativo · 10 idiomas no catálogo';
+    status = 'Reconhecimento Whisper local · idiomas detectados automaticamente';
+    unawaited(_preparePreferredTranslationModels());
     _whisperTicker?.cancel();
     _whisperTicker = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!running || _processing) return;
@@ -546,6 +547,40 @@ class TranslationController extends ChangeNotifier {
       }
     });
     _update();
+  }
+
+  Future<void> _preparePreferredTranslationModels() async {
+    // Preparacao de modelos totalmente pelo app, sem configuracoes do Samsung.
+    final requested = <String>{
+      selectedTarget,
+      tvMode ? 'en' : selectedSource,
+    };
+    for (final code in requested) {
+      if (!running || _disposed) return;
+      final language = getLinguaLanguage(code);
+      if (language == null) continue;
+      try {
+        final remoteCode = language.translateCode.bcpCode;
+        final present = await _models.isModelDownloaded(remoteCode)
+            .timeout(const Duration(seconds: 12));
+        if (!present) {
+          languagePacks[code] = PackState.installing;
+          packFeedback = 'O LinguaFlow esta preparando ${language.name} internamente.';
+          _update();
+          final ok = await _models.downloadModel(remoteCode,
+              isWifiRequired: !allowMobileDataForModels)
+              .timeout(const Duration(seconds: 120));
+          if (!ok) throw StateError('O download não foi confirmado.');
+        }
+        languagePacks[code] = PackState.installed;
+        packFeedback = '${language.name} preparado para tradução no aplicativo.';
+      } catch (_) {
+        languagePacks[code] = PackState.failed;
+        packFeedback = 'Não foi possível preparar ${language.name} agora. '
+            'O reconhecimento e as legendas originais continuam funcionando.';
+      }
+      _update();
+    }
   }
 
   Future<bool> _verifyModels() async {
@@ -1063,7 +1098,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 border: Border.all(color: const Color(0xFF25425B)),
               ),
               child: Column(children: [
-                const Text('INTERPRETE FUTURISTA · V0.8',
+                const Text('INTERPRETE FUTURISTA · V0.9',
                     style: TextStyle(
                       fontSize: 10, letterSpacing: 2.2,
                       fontWeight: FontWeight.w800,
@@ -1125,6 +1160,18 @@ class _TranslationPageState extends State<TranslationPage> {
               ]),
             ),
             const SizedBox(height: 15),
+            if (controller.useWhisper) SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: controller.autoDetectSpeech,
+              onChanged: running || controller.busy
+                  ? null : controller.setAutoDetectSpeech,
+              title: const Text('Reconhecer idioma automaticamente',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Whisper multilíngue embutido no app. '
+                  'Sem instalar vozes nas configurações Samsung.'),
+              secondary: const Icon(Icons.auto_awesome,
+                  color: Color(0xFF62F0D2)),
+            ),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: controller.tvMode,
@@ -1179,7 +1226,7 @@ class _TranslationPageState extends State<TranslationPage> {
                       color: Color(0xFF8CAEC7), fontSize: 11))),
             ]),
             const SizedBox(height: 7),
-            Text('Modelos de tradução: ${controller.modelsStatus}',
+            Text('Tradução: ${controller.packFeedback}',
                 style: const TextStyle(
                     color: Color(0xFFFFD89A), fontSize: 11)),
             if (controller.deviceNotice != null) ...[
@@ -1454,7 +1501,7 @@ class _TranslationPageState extends State<TranslationPage> {
               ],
             ),
             const SizedBox(height: 14),
-            SwitchListTile.adaptive(
+            if (!controller.useWhisper) SwitchListTile.adaptive(
               value: controller.allowSystemRecognition,
               onChanged: running || controller.busy
                   ? null : controller.setAllowSystemRecognition,
@@ -1488,7 +1535,7 @@ class _TranslationPageState extends State<TranslationPage> {
                   'e pode consumir a franquia de dados do celular.'),
               contentPadding: EdgeInsets.zero,
             ),
-            if (!running) ...[
+            if (!running && !controller.useWhisper) ...[
               const SizedBox(height: 12),
               ListTile(
                 contentPadding: EdgeInsets.zero,
