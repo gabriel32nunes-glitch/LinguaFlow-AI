@@ -836,6 +836,7 @@ class _TranslationPageState extends State<TranslationPage> {
   bool consent = false;
   String phraseCategory = 'Todos';
   String phraseQuery = '';
+  final TextEditingController _textInput = TextEditingController();
 
   @override
   void initState() {
@@ -851,6 +852,7 @@ class _TranslationPageState extends State<TranslationPage> {
   @override
   void dispose() {
     controller.removeListener(_refresh);
+    _textInput.dispose();
     controller.dispose();
     super.dispose();
   }
@@ -1085,6 +1087,117 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ],
             const SizedBox(height: 14),
+            ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+              initiallyExpanded: false,
+              leading: const Icon(Icons.language_rounded, color: Color(0xFF5CF1D5)),
+              title: const Text('Biblioteca de 10 idiomas',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: const Text('Instale pacotes sem sair do aplicativo'),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(7),
+                  child: Text('Os pacotes de tradução são independentes do '
+                      'reconhecimento de fala. Instale somente os idiomas '
+                      'necessários para economizar espaço.',
+                      style: TextStyle(color: Color(0xFFC1CFE0), fontSize: 12)),
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: running || controller.busy
+                          ? null : controller.refreshLanguagePacks,
+                      icon: const Icon(Icons.fact_check),
+                      label: const Text('Verificar pacotes'),
+                    ),
+                    Text(controller.packFeedback,
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF97CECB))),
+                  ],
+                ),
+                for (final language in linguaLanguages)
+                  ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 3),
+                    title: Text('${language.name} · ${language.nativeName}'),
+                    subtitle: Text(packStateLabel(
+                      controller.languagePacks[language.code] ?? PackState.unknown,
+                    ), style: const TextStyle(fontSize: 11)),
+                    trailing: controller.languagePacks[language.code] == PackState.installed
+                        ? IconButton(
+                            onPressed: running || controller.busy
+                                ? null : () => controller.removeLanguagePack(language.code),
+                            tooltip: 'Remover pacote',
+                            icon: const Icon(Icons.delete_outline),
+                          )
+                        : TextButton(
+                            onPressed: running || controller.busy
+                                ? null : () => controller.installLanguagePack(language.code),
+                            child: const Text('Preparar'),
+                          ),
+                  ),
+                const Divider(),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Traduzir texto com os pacotes instalados',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Row(children: [
+                  Expanded(child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: controller.selectedSource,
+                    items: [
+                      for (final language in linguaLanguages)
+                        DropdownMenuItem(
+                          value: language.code,
+                          child: Text(language.name, overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: running || controller.busy
+                        ? null : (value) {
+                          if (value != null) controller.selectSource(value);
+                        },
+                  )),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Icon(Icons.arrow_forward_rounded, size: 18),
+                  ),
+                  Expanded(child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: controller.selectedTarget,
+                    items: [
+                      for (final language in linguaLanguages)
+                        DropdownMenuItem(
+                          value: language.code,
+                          child: Text(language.name, overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: running || controller.busy
+                        ? null : (value) {
+                          if (value != null) controller.selectTarget(value);
+                        },
+                  )),
+                ]),
+                TextField(
+                  controller: _textInput,
+                  minLines: 1, maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Escreva aqui para traduzir',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: running || controller.busy
+                      ? null : () => controller.setTextTranslation(_textInput.text),
+                  icon: const Icon(Icons.translate),
+                  label: const Text('Traduzir texto'),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
             ExpansionTile(
               tilePadding: const EdgeInsets.symmetric(horizontal: 8),
               initiallyExpanded: false,
