@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: linguaflow-emulator-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -57,6 +61,12 @@ jobs:
           profile: pixel_7
           disable-animations: true
           script: bash ci/smoke_android.sh
+
+      - name: Publicar APK experimental apenas apos os testes
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaFlow-V05-APK-EMULADOR
+          path: build/app/outputs/flutter-apk/app-debug.apk
 
       - name: Publicar logs e captura de tela do emulador
         if: always()
