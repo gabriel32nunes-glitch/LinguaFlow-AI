@@ -35,6 +35,8 @@ class MainActivity : FlutterActivity() {
     private var pendingTranslation = false
     private var detectedLanguage: String? = null
     private var languageMode = "auto"
+    private var allowSystemRecognition = false
+    private var usingSystemRecognizer = false
     private var otherErrors = 0
     private var economyMode = true
     private var consecutiveSilence = 0
@@ -57,13 +59,15 @@ class MainActivity : FlutterActivity() {
                             "manufacturer" to Build.MANUFACTURER,
                             "memoryClassMb" to manager.memoryClass,
                             "lowRamDevice" to manager.isLowRamDevice,
-                            "onDeviceSpeechAvailable" to SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+                            "onDeviceSpeechAvailable" to SpeechRecognizer.isOnDeviceRecognitionAvailable(this),
+                            "systemSpeechAvailable" to SpeechRecognizer.isRecognitionAvailable(this)
                         ))
                     }
                     "checkSupport" -> {
                         val mode = call.argument<String>("languageMode")
                             ?.takeIf { it == "en" || it == "pt" } ?: "auto"
-                        val reason = checkSupport(mode)
+                        val allowSystem = call.argument<Boolean>("allowSystemRecognition") ?: false
+                        val reason = checkSupport(mode, allowSystem)
                         reply.success(mapOf(
                             "supported" to (reason == null),
                             "message" to (reason ?: "Pronto para áudio no próprio dispositivo")
@@ -73,7 +77,8 @@ class MainActivity : FlutterActivity() {
                         economyMode = call.argument<Boolean>("economyMode") ?: true
                         languageMode = call.argument<String>("languageMode")
                             ?.takeIf { it == "en" || it == "pt" } ?: "auto"
-                        val reason = checkSupport(languageMode)
+                        allowSystemRecognition = call.argument<Boolean>("allowSystemRecognition") ?: false
+                        val reason = checkSupport(languageMode, allowSystemRecognition)
                         if (reason != null) {
                             reply.error("UNSUPPORTED", reason, null)
                         } else {
@@ -112,7 +117,10 @@ class MainActivity : FlutterActivity() {
             })
     }
 
-    private fun checkSupport(mode: String = languageMode): String? {
+    private fun checkSupport(
+        mode: String = languageMode,
+        permitSystemSpeech: Boolean = allowSystemRecognition
+    ): String? {
         if (Build.VERSION.SDK_INT < 34 && mode == "auto") {
             return "Para detectar e alternar português/inglês automaticamente nesta versão, " +
                 "é necessário Android 14 ou superior. Nenhum serviço pago será usado."
@@ -122,9 +130,16 @@ class MainActivity : FlutterActivity() {
             // O Flutter pedirá a permissão ANTES de começar. 'checkSupport' é consultado
             // antes disso, portanto a ausência da permissão não bloqueia esta consulta.
         }
-        if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
-            return "Este aparelho não possui reconhecedor de fala local disponível. " +
-                "Instale/ative o serviço de fala offline do Android e os modelos inglês/português."
+        val local = SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        val system = SpeechRecognizer.isRecognitionAvailable(this)
+        if (!local && !(permitSystemSpeech && system)) {
+            return if (system) {
+                "A voz offline não está disponível. Para testar o serviço Android de fala, " +
+                    "ative a opção opcional 'Reconhecimento via serviço do Android'. " +
+                    "Ele poderá precisar de internet e processar áudio fora do aparelho."
+            } else {
+                "Nenhum reconhecedor Android está disponível. Instale/ative o serviço de fala do sistema."
+            }
         }
         return null
     }
@@ -135,7 +150,15 @@ class MainActivity : FlutterActivity() {
             throw SecurityException("Permissão RECORD_AUDIO negada")
         }
         stopSession()
-        recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        usingSystemRecognizer = !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        recognizer = if (usingSystemRecognizer) {
+            if (!allowSystemRecognition) {
+                throw IllegalStateException("Serviço de fala remoto não autorizado")
+            }
+            SpeechRecognizer.createSpeechRecognizer(this)
+        } else {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        }
         recognizer!!.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 otherErrors = 0
@@ -235,7 +258,7 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !usingSystemRecognizer)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE,
                 if (languageMode == "en") "en-US" else "pt-BR")
             if (Build.VERSION.SDK_INT >= 34 && languageMode == "auto") {
@@ -296,6 +319,7 @@ class MainActivity : FlutterActivity() {
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+        usingSystemRecognizer = false
     }
 
     override fun onPause() {
