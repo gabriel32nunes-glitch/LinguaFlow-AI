@@ -19,6 +19,24 @@ void main() {
     expect(result.every((p) => p.category == 'Manutenção'), isTrue);
   });
 
+  test('reconhecimento local reconhece frase sem acento ou pontuacao', () {
+    final matched = matchSpokenWorkPhrase('Pare a maquina imediatamente');
+    expect(matched, isNotNull);
+    expect(matched!.phrase.id, 'stop');
+    expect(matched.inEnglish, isFalse);
+  });
+
+  test('reconhecimento bilingue indica a direcao correta', () {
+    final matched = matchSpokenWorkPhrase('Stop the machine immediately');
+    expect(matched, isNotNull);
+    expect(matched!.inEnglish, isTrue);
+    expect(matched.phrase.pt, contains('máquina'));
+  });
+
+  test('nao inventar traducao para frase desconhecida', () {
+    expect(matchSpokenWorkPhrase('A temperatura da prensa agora e 93 graus'), isNull);
+  });
+
   test('frases prioritarias existem para seguranca', () {
     expect(workPhrases.where((p) => p.category == 'Segurança' && p.priority),
         isNotEmpty);
