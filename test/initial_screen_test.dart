@@ -37,7 +37,7 @@ void main() {
     await tester.pumpWidget(const LinguaFlowApp());
     await tester.pump();
 
-    expect(find.textContaining('VERSÃO 0.6'), findsOneWidget);
+    expect(find.textContaining('INTERPRETE FUTURISTA · V0.7'), findsOneWidget);
     expect(find.textContaining('Modelos ainda não verificados'), findsOneWidget);
     expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
     expect(find.textContaining('SM-A145M'), findsOneWidget);
