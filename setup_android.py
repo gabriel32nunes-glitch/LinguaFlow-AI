@@ -40,6 +40,7 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         if (!signingPath.isNullOrBlank()) {
             create("linguaflowRelease") {
                 storeFile = file(signingPath)
+                storeType = "JKS"
                 storePassword = System.getenv("LINGUAFLOW_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("LINGUAFLOW_KEY_ALIAS")
                 keyPassword = System.getenv("LINGUAFLOW_KEY_PASSWORD")
