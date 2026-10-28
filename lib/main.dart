@@ -608,7 +608,7 @@ class _TranslationPageState extends State<TranslationPage> {
             const SizedBox(height: 14),
             ExpansionTile(
               tilePadding: const EdgeInsets.symmetric(horizontal: 8),
-              initiallyExpanded: true,
+              initiallyExpanded: false,
               leading: const Icon(Icons.work_outline),
               title: const Text('Frases profissionais sem download'),
               subtitle: const Text('Disponiveis mesmo se o ML Kit falhar'),
