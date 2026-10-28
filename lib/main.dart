@@ -7,6 +7,7 @@ import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'work_phrases.dart';
+import 'language_direction.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -352,18 +353,21 @@ class TranslationController extends ChangeNotifier {
       status = 'Identificando idioma…';
       _update();
 
-      String language = languageMode == 'auto'
-          ? (event['language']?.toString().toLowerCase() ?? '')
-          : languageMode;
-      if (!language.startsWith('pt') && !language.startsWith('en')) {
-        language = await _languageId.identifyLanguage(text);
+      String language = event['language']?.toString() ?? '';
+      if (languageMode == 'auto' &&
+          resolveSourceLanguage(mode: 'auto', detectedTag: language) == null) {
+        language = await _languageId.identifyLanguage(text)
+            .timeout(const Duration(seconds: 8));
       }
-      final isEnglish = language.startsWith('en');
-      final isPortuguese = language.startsWith('pt');
-      if (!isEnglish && !isPortuguese) {
-        warning = 'Idioma não identificado nesta frase. Fale um pouco mais claramente.';
+      final source = resolveSourceLanguage(
+        mode: languageMode, detectedTag: language,
+      );
+      if (source == null) {
+        warning = 'Idioma nao identificado; nenhuma traducao foi inventada. '
+            'Use Portugues ou English no seletor manual se necessario.';
         return;
       }
+      final isEnglish = source == SourceLanguage.english;
 
       status = isEnglish ? 'Traduzindo para português…' : 'Traduzindo para inglês…';
       _update();
