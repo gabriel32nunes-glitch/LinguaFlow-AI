@@ -202,7 +202,16 @@ class TranslationController extends ChangeNotifier {
             ? 'Modo contingencia: apenas frases prontas (sem ML Kit)'
             : 'Preparando as vozes locais…';
         _update();
-        await _initializeVoices().timeout(const Duration(seconds: 20));
+        if (audioEnabled) {
+          try {
+            await _initializeVoices().timeout(const Duration(seconds: 12));
+          } catch (e) {
+            // O microfone e as legendas nao devem depender do motor TTS.
+            _voices.clear();
+            warning = 'A voz offline nao ficou pronta: $e. '
+                'A conversa pode continuar com legendas.';
+          }
+        }
       }
       await _events?.cancel();
       _events = _speechEvents.receiveBroadcastStream().listen(
