@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
@@ -12,6 +13,7 @@ import 'device_profile.dart';
 import 'voice_aura.dart';
 import 'language_library.dart';
 import 'local_whisper_voice.dart';
+import 'update_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1018,12 +1020,60 @@ class _TranslationPageState extends State<TranslationPage> {
   String phraseCategory = 'Todos';
   String phraseQuery = '';
   final TextEditingController _textInput = TextEditingController();
+  final LinguaFlowUpdater _updater = LinguaFlowUpdater();
+  LinguaFlowRelease? _newVersion;
+  bool _checkingUpdate = false;
+  String _updateStatus = 'Verifique atualizações sem sair do LinguaFlow.';
 
   @override
   void initState() {
     super.initState();
     controller.addListener(_refresh);
     unawaited(controller.inspectDevice());
+    // Evita rede em testes de widget; no APK de release checa uma vez
+    // apos a tela abrir, sem avisos em caso de ausencia de internet.
+    if (kReleaseMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_checkUpdates(silent: true));
+      });
+    }
+  }
+
+  Future<void> _checkUpdates({bool silent = false}) async {
+    if (_checkingUpdate) return;
+    setState(() {
+      _checkingUpdate = true;
+      if (!silent) _updateStatus = 'Verificando versão oficial…';
+    });
+    try {
+      final result = await _updater.check();
+      if (!mounted) return;
+      setState(() {
+        _newVersion = result.release;
+        if (!silent || result.available) _updateStatus = result.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      if (!silent) {
+        setState(() {
+          _updateStatus = 'Sem conexão com as atualizações agora. '
+              'Seu LinguaFlow pode continuar funcionando.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
+
+  Future<void> _openUpdate() async {
+    final release = _newVersion;
+    if (release == null) return;
+    try {
+      await _updater.openDownload(release);
+    } catch (_) {
+      if (mounted) setState(() =>
+        _updateStatus = 'Não foi possível abrir o download oficial.');
+    }
   }
 
   void _refresh() {
@@ -1238,6 +1288,56 @@ class _TranslationPageState extends State<TranslationPage> {
                 content: controller.deviceNotice!,
               ),
             ],
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF101F32),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _newVersion != null
+                      ? const Color(0xFF58F1D0)
+                      : const Color(0xFF263C51),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(children: [
+                    Icon(Icons.system_update_alt_rounded,
+                        size: 17, color: Color(0xFF58F1D0)),
+                    SizedBox(width: 8),
+                    Text('ATUALIZAÇÕES',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold, letterSpacing: 1.1,
+                          fontSize: 12,
+                        )),
+                  ]),
+                  const SizedBox(height: 7),
+                  Text(_updateStatus,
+                      style: const TextStyle(
+                        color: Color(0xFFAFBDD0), fontSize: 12,
+                      )),
+                  const SizedBox(height: 5),
+                  if (_newVersion == null) TextButton.icon(
+                    onPressed: _checkingUpdate
+                        ? null : () => _checkUpdates(),
+                    icon: const Icon(Icons.refresh, size: 17),
+                    label: Text(_checkingUpdate
+                        ? 'Verificando…' : 'Verificar atualização'),
+                  ) else FilledButton.icon(
+                    onPressed: _openUpdate,
+                    icon: const Icon(Icons.download_rounded, size: 19),
+                    label: Text('Atualizar para v${_newVersion!.name}'),
+                  ),
+                  const Text('A instalação é confirmada pelo Android. '
+                      'Não é necessário apagar o app se a assinatura coincidir.',
+                      style: TextStyle(
+                        fontSize: 10, color: Color(0xFF7E96AB),
+                      )),
+                ],
+              ),
+            ),
             const SizedBox(height: 22),
             const Row(children: [
               Icon(Icons.subtitles_rounded,
