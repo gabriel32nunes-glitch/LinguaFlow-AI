@@ -70,6 +70,7 @@ class TranslationController extends ChangeNotifier {
   bool allowMobileDataForModels = true;
   bool modelsReady = false;
   bool microphoneOnly = false;
+  bool phraseOnly = false;
   String languageMode = 'auto';
   final List<TranslationTurn> history = [];
   String modelsStatus = 'Modelos ainda não verificados';
@@ -133,14 +134,20 @@ class TranslationController extends ChangeNotifier {
       if (!mic.isGranted) {
         throw StateError('Permita acesso ao microfone nas configurações do Android.');
       }
+      phraseOnly = false;
       if (!microphoneOnly) {
-        // Não começar tradução enquanto o ML Kit não tiver modelos de fato.
-        final available = await _verifyModels();
-        if (!available) {
-          throw StateError('Falta um modelo de tradução. Toque em "Baixar modelos" '
-              'e veja o resultado. O modo "Testar microfone" funciona sem modelos.');
+        // Nao bloquear a conversa se o ML Kit estiver sem modelos.
+        // Nesse caso, reconhecer SOMENTE as frases profissionais predefinidas.
+        bool available = false;
+        try {
+          available = await _verifyModels();
+        } catch (e) {
+          modelsStatus = 'Modelos indisponiveis: $e';
         }
-        status = 'Preparando as vozes locais…';
+        phraseOnly = !available;
+        status = phraseOnly
+            ? 'Modo contingencia: apenas frases prontas (sem ML Kit)'
+            : 'Preparando as vozes locais…';
         _update();
         await _initializeVoices().timeout(const Duration(seconds: 20));
       }
@@ -161,7 +168,9 @@ class TranslationController extends ChangeNotifier {
       running = true;
       status = microphoneOnly
           ? 'TESTE: ouvindo voz sem tentar traduzir…'
-          : 'Tradução bilateral ativa — ouvindo…';
+          : phraseOnly
+              ? 'Ouvindo frases prontas PT/EN (traducao limitada)…'
+              : 'Tradução bilateral ativa — ouvindo…';
       _update();
     } catch (e) {
       warning = e.toString().replaceFirst('Bad state: ', '');
@@ -338,6 +347,39 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
+  Future<void> _displayAndSpeak({
+    required String sourceText,
+    required String translation,
+    required bool fromEnglish,
+  }) async {
+    if (!running) return;
+    if (fromEnglish) {
+      portuguese = translation;
+    } else {
+      english = translation;
+    }
+    history.insert(0, TranslationTurn(
+      source: sourceText, translation: translation, fromEnglish: fromEnglish,
+    ));
+    if (history.length > 12) history.removeLast();
+    warning = null;
+    status = 'Tradução concluída';
+    _update();
+    final target = fromEnglish ? 'pt' : 'en';
+    if (audioEnabled && _voices.containsKey(target)) {
+      speaking = true;
+      status = 'Reproduzindo tradução…';
+      _update();
+      final voice = _voices[target]!;
+      await _tts.setLanguage(target == 'pt' ? 'pt-BR' : 'en-US');
+      await _tts.setVoice({
+        'name': voice['name'].toString(),
+        'locale': voice['locale'].toString(),
+      });
+      await _tts.speak(translation).timeout(const Duration(seconds: 60));
+    }
+  }
+
   Future<void> _handleFinal(Map<String, dynamic> event) async {
     try {
       if (!running) return;
@@ -348,6 +390,22 @@ class TranslationController extends ChangeNotifier {
       if (microphoneOnly) {
         status = 'Microfone OK: fala reconhecida! Teste novamente ou encerre.';
         _update();
+        return;
+      }
+      if (phraseOnly) {
+        final match = matchSpokenWorkPhrase(text);
+        if (match == null) {
+          status = 'Frase fora do catalogo offline';
+          warning = 'Sem os modelos ML Kit, so posso traduzir as frases '
+              'exibidas no catalogo profissional. Nao foi feita uma traducao inventada.';
+          _update();
+          return;
+        }
+        await _displayAndSpeak(
+          sourceText: text,
+          translation: match.inEnglish ? match.phrase.pt : match.phrase.en,
+          fromEnglish: match.inEnglish,
+        );
         return;
       }
       status = 'Identificando idioma…';
@@ -375,31 +433,9 @@ class TranslationController extends ChangeNotifier {
           ? await _enToPt.translateText(text).timeout(const Duration(seconds: 20))
           : await _ptToEn.translateText(text).timeout(const Duration(seconds: 20));
       if (!running) return;
-      if (isEnglish) {
-        portuguese = translation;
-      } else {
-        english = translation;
-      }
-      history.insert(0, TranslationTurn(
-        source: text, translation: translation, fromEnglish: isEnglish,
-      ));
-      if (history.length > 12) history.removeLast();
-      status = 'Tradução concluída';
-      _update();
-
-      if (audioEnabled && _voices.containsKey(isEnglish ? 'pt' : 'en')) {
-        speaking = true;
-        status = 'Reproduzindo tradução…';
-        _update();
-        final target = isEnglish ? 'pt' : 'en';
-        final voice = _voices[target]!;
-        await _tts.setLanguage(target == 'pt' ? 'pt-BR' : 'en-US');
-        await _tts.setVoice(<String, String>{
-          'name': voice['name'].toString(),
-          'locale': voice['locale'].toString(),
-        });
-        await _tts.speak(translation).timeout(const Duration(seconds: 60)); // evita eco
-      }
+      await _displayAndSpeak(
+        sourceText: text, translation: translation, fromEnglish: isEnglish,
+      );
     } catch (e) {
       warning = 'Falha ao traduzir/reproduzir: $e';
     } finally {
@@ -475,6 +511,7 @@ class TranslationController extends ChangeNotifier {
     partial = '';
     status = 'Sessão encerrada';
     microphoneOnly = false;
+    phraseOnly = false;
     _update();
     try {
       await _speech.invokeMethod<void>('stop');
@@ -795,7 +832,8 @@ class _TranslationPageState extends State<TranslationPage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('V0.5: frases prontas funcionam sem modelos; fala livre ainda exige ML Kit. '
+            const Text('V0.5: sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
+                'Fala livre ainda exige ML Kit. '
                 'O teste de microfone funciona sem modelos. Tradução exige os pacotes PT/EN; Android 14+ '
                 'é necessário para troca de idioma no reconhecedor local. Mantenha a tela aberta; '
                 'não guarda gravações nem usa APIs pagas. Durante a voz traduzida '
