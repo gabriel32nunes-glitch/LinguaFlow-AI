@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'work_phrases.dart';
 import 'language_direction.dart';
 import 'device_profile.dart';
+import 'voice_aura.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,14 +21,14 @@ class LinguaFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'LinguaFlow AI Grátis',
+        title: 'LinguaFlow AI',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,
-          scaffoldBackgroundColor: const Color(0xFF0A101D),
+          scaffoldBackgroundColor: const Color(0xFF080D1C),
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF59DFBE),
+            seedColor: const Color(0xFF58F1D0),
             brightness: Brightness.dark,
           ),
         ),
@@ -655,13 +656,25 @@ class _TranslationPageState extends State<TranslationPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        title: const Text('LinguaFlow AI', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Row(children: [
+          Icon(Icons.hub_rounded, color: Color(0xFF58F1D0), size: 25),
+          SizedBox(width: 9),
+          Text('LINGUA', style: TextStyle(
+              fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+          Text('FLOW', style: TextStyle(
+              fontSize: 18, color: Color(0xFF58F1D0),
+              fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+        ]),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: 12),
             child: Chip(
-              avatar: Icon(Icons.lock_outline, size: 16, color: accent),
-              label: const Text('SEM API PAGA'),
+              side: const BorderSide(color: Color(0xFF24536A)),
+              backgroundColor: const Color(0xFF0E1D30),
+              avatar: const Icon(Icons.shield_outlined, size: 15,
+                  color: Color(0xFF58F1D0)),
+              label: const Text('SEM API PAGA',
+                  style: TextStyle(fontSize: 10, letterSpacing: 0.2)),
             ),
           ),
         ],
@@ -670,30 +683,114 @@ class _TranslationPageState extends State<TranslationPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
           children: [
-            const Text('Conversa bilateral, sem botões por frase.',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, height: 1.15)),
-            const SizedBox(height: 10),
-            const Text('VERSÃO 0.6 · PERFIL GALAXY A14 4G',
-                style: TextStyle(color: Color(0xFF59DFBE),
-                    fontSize: 13, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Text(controller.status,
-                style: const TextStyle(color: Color(0xFFA6B8CA), fontSize: 14)),
-            const SizedBox(height: 8),
-            Text('Modelos: ${controller.modelsStatus}',
-              style: const TextStyle(color: Color(0xFFFFD285), fontSize: 13)),
-            const SizedBox(height: 6),
-            Text(controller.deviceStatus,
-              style: const TextStyle(color: Color(0xFFA1C6DC), fontSize: 12)),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(26),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF132B43),
+                    Color(0xFF0D1A32),
+                    Color(0xFF11152A),
+                  ],
+                ),
+                border: Border.all(color: const Color(0xFF25425B)),
+              ),
+              child: Column(children: [
+                const Text('INTERPRETE FUTURISTA · V0.7',
+                    style: TextStyle(
+                      fontSize: 10, letterSpacing: 2.2,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF69E2DD),
+                    )),
+                const SizedBox(height: 5),
+                const Text('CONVERSA SEM BARREIRAS',
+                    style: TextStyle(fontSize: 16, letterSpacing: 0.7,
+                        fontWeight: FontWeight.w900)),
+                VoiceAura(
+                  listening: running,
+                  speaking: controller.speaking,
+                  hasSpeech: controller.partial.isNotEmpty,
+                  economy: controller.economyMode,
+                ),
+                const SizedBox(height: 13),
+                Text(
+                  controller.status,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFB7CCDC), fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (controller.busy) ...[
+                  const SizedBox(height: 12),
+                  const LinearProgressIndicator(minHeight: 3),
+                ],
+              ]),
+            ),
+            const SizedBox(height: 15),
+            if (!running) CheckboxListTile(
+              value: consent,
+              onChanged: controller.busy
+                  ? null : (value) => setState(() => consent = value ?? false),
+              title: const Text('Todos sabem que o microfone sera usado.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFB8CADC))),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+            FilledButton.icon(
+              onPressed: controller.busy ? null : () => _toggle(),
+              icon: Icon(running ? Icons.stop_circle_rounded
+                  : Icons.mic_rounded, size: 23),
+              label: Text(controller.busy ? 'PREPARANDO…' :
+                  running ? 'ENCERRAR CONVERSA' : 'INICIAR CONVERSA'),
+              style: FilledButton.styleFrom(
+                backgroundColor: running
+                    ? const Color(0xFFFF869E) : accent,
+                foregroundColor: const Color(0xFF071520),
+                minimumSize: const Size.fromHeight(59),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(17)),
+                textStyle: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w900,
+                    letterSpacing: 1.1),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              const Icon(Icons.memory_rounded, size: 15,
+                  color: Color(0xFF7ED5F1)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(controller.deviceStatus,
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Color(0xFF8CAEC7), fontSize: 11))),
+            ]),
+            const SizedBox(height: 7),
+            Text('Modelos de tradução: ${controller.modelsStatus}',
+                style: const TextStyle(
+                    color: Color(0xFFFFD89A), fontSize: 11)),
             if (controller.deviceNotice != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _InfoTile(
                 icon: Icons.info_outline,
-                title: 'Compatibilidade do seu Android',
+                title: 'Compatibilidade do Android',
                 content: controller.deviceNotice!,
               ),
             ],
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
+            const Row(children: [
+              Icon(Icons.subtitles_rounded,
+                  color: Color(0xFF60EBD0), size: 18),
+              SizedBox(width: 7),
+              Text('TRADUÇÕES AO VIVO',
+                style: TextStyle(fontSize: 12,
+                    letterSpacing: 1.6, fontWeight: FontWeight.w800)),
+            ]),
+            const SizedBox(height: 12),
             _TranslationCard(
               heading: '🇺🇸 Inglês → Português',
               subtitle: 'O que o estrangeiro falou',
@@ -894,32 +991,9 @@ class _TranslationPageState extends State<TranslationPage> {
                 label: const Text('Testar microfone SEM tradução'),
               ),
             ],
-            if (controller.busy) const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
-              child: LinearProgressIndicator(),
-            ),
-            if (!running) CheckboxListTile(
-              value: consent,
-              onChanged: controller.busy ? null : (v) => setState(() => consent = v ?? false),
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: const Text('Os participantes sabem que o microfone será usado.'),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: controller.busy ? null : () => _toggle(),
-              icon: Icon(running ? Icons.stop_circle_outlined : Icons.mic),
-              label: Text(controller.busy ? 'Preparando…' :
-                  running ? 'Encerrar sessão' : 'Iniciar tradução automática'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(60),
-                backgroundColor: running ? const Color(0xFFF08A96) : accent,
-                foregroundColor: const Color(0xFF101622),
-                textStyle: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('V0.6: perfil A14 4G reduz tentativas e consumo. '
+            const SizedBox(height: 18),
+            const Text('V0.7: efeitos de voz sao indicativos, nao representam volume real. '
+                'O perfil A14 4G reduz tentativas e consumo. '
                 'Sem modelos, o microfone tenta reconhecer APENAS as frases prontas. '
                 'Fala livre ainda exige ML Kit. '
                 'O teste de microfone funciona sem modelos. Tradução exige os pacotes PT/EN; Android 14+ '
@@ -954,9 +1028,15 @@ class _TranslationCard extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         constraints: const BoxConstraints(minHeight: 155),
         decoration: BoxDecoration(
-          color: const Color(0xFF152136),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [const Color(0xFF14253D),
+              accent.withValues(alpha: 0.065),
+              const Color(0xFF0D1A2E)],
+          ),
           borderRadius: BorderRadius.circular(21),
-          border: Border.all(color: const Color(0xFF293B52)),
+          border: Border.all(color: accent.withValues(alpha: 0.30)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(heading, style: TextStyle(color: accent, fontSize: 15, fontWeight: FontWeight.w800)),
