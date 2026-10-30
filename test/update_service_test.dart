@@ -47,6 +47,16 @@ void main() {
     expect(LinguaFlowRelease.fromGitHub(wrong), isNull);
   });
 
+  test('primeira release oficial usa app-release.apk', () {
+    final item = release(tag: 'v0.9.0+100001',
+        url: 'https://github.com/gabriel32nunes-glitch/LinguaFlow-AI/'
+            'releases/download/v0.9.0+100001/app-release.apk');
+    (item['assets'] as List)[0]['name'] = 'app-release.apk';
+    final parsed = LinguaFlowRelease.fromGitHub(item);
+    expect(parsed, isNotNull);
+    expect(parsed!.buildNumber, 100001);
+  });
+
   test('tag invalida nao e considerada atualizacao', () {
     expect(LinguaFlowRelease.fromGitHub(
       release(tag: 'v0.10.0')), isNull);
