@@ -38,7 +38,11 @@ class LinguaFlowRelease {
     if (assets is! List) return null;
     for (final asset in assets) {
       if (asset is! Map) continue;
-      if (asset['name'] != 'LinguaFlow-A14-arm64.apk') continue;
+      // A primeira release assinada foi publicada com o nome app-release.apk.
+      // As proximas versoes podem usar o nome amigavel ARM64.
+      const allowedApks = ['LinguaFlow-A14-arm64.apk', 'app-release.apk'];
+      final name = asset['name'];
+      if (name is! String || !allowedApks.contains(name)) continue;
       final raw = asset['browser_download_url'];
       if (raw is! String) continue;
       final uri = Uri.tryParse(raw);
@@ -47,7 +51,7 @@ class LinguaFlowRelease {
           uri.host != 'github.com' ||
           !uri.path.startsWith(
               '/gabriel32nunes-glitch/LinguaFlow-AI/releases/download/') ||
-          !uri.path.endsWith('/LinguaFlow-A14-arm64.apk')) {
+          !uri.path.endsWith('/$name')) {
         continue;
       }
       return LinguaFlowRelease(
