@@ -2,7 +2,7 @@
 # Testa instalacao e inicializacao, NAO valida traducao nem microfone.
 set -euo pipefail
 
-APP_ID="com.example.linguaflow_ai"
+APP_ID="com.example.linguaflow_ai.dev"
 APK="build/app/outputs/flutter-apk/app-debug.apk"
 mkdir -p ci-artifacts
 
