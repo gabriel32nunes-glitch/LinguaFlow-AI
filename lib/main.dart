@@ -1028,6 +1028,7 @@ class TranslationController extends ChangeNotifier {
             'de ${target.name} no celular. Mostre o texto ao cliente.';
         return true;
       }
+      warning = null;
       speaking = true;
       status = 'Falando com o cliente em ${target.name}…';
       _update();
@@ -1500,8 +1501,11 @@ class _TranslationPageState extends State<TranslationPage> {
                                 Text(reply.pt, style: const TextStyle(
                                     fontWeight: FontWeight.w700)),
                                 const SizedBox(height: 2),
-                                Text(reply.en, style: const TextStyle(
-                                    fontSize: 11, color: Color(0xFFB6C7D6))),
+                                Text(controller.selectedSource == 'en'
+                                    ? reply.en
+                                    : 'Traduzir para ${getLinguaLanguage(controller.selectedSource)?.name ?? 'idioma selecionado'}',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Color(0xFFB6C7D6))),
                               ],
                             )),
                             const Icon(Icons.volume_up_rounded,
@@ -1577,6 +1581,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 content: controller.deviceNotice!,
               ),
             ],
+            if (kReleaseMode) ...[
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(11),
@@ -1627,6 +1632,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 ],
               ),
             ),
+            ],
             const SizedBox(height: 22),
             const Row(children: [
               Icon(Icons.subtitles_rounded,
