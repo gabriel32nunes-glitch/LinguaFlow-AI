@@ -20,9 +20,9 @@ shutil.copy2(root / 'native_android/AndroidManifest.xml', manifest)
 debug_manifest = android / 'app/src/debug/AndroidManifest.xml'
 debug_manifest.parent.mkdir(parents=True, exist_ok=True)
 debug_manifest.write_text(
-    '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\\n'
-    '    <application android:label="LinguaFlow DEV" />\\n'
-    '</manifest>\\n',
+    '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+    '    <application android:label="LinguaFlow DEV" />\n'
+    '</manifest>\n',
     encoding='utf-8',
 )
 
