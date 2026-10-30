@@ -1549,12 +1549,18 @@ class _TranslationPageState extends State<TranslationPage> {
                         'o texto traduzido continua visível.',
                         style: TextStyle(
                             color: Color(0xFF91ABBE), fontSize: 11)),
-                    if (!running && !controller.busy)
+                    if (!running && !controller.busy) ...[
                       TextButton.icon(
                         onPressed: controller.prepareModels,
                         icon: const Icon(Icons.download_rounded),
                         label: const Text('Preparar tradução inglês/português'),
                       ),
+                      TextButton.icon(
+                        onPressed: () => _toggle(microphoneOnly: true),
+                        icon: const Icon(Icons.hearing_rounded),
+                        label: const Text('Testar microfone sem tradução'),
+                      ),
+                    ],
                   ],
                 ),
               ),
