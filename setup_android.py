@@ -15,6 +15,17 @@ kotlin_file.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(root / 'native_android/MainActivity.kt', kotlin_file)
 shutil.copy2(root / 'native_android/AndroidManifest.xml', manifest)
 
+# O app de desenvolvimento usa outro ID e outro nome: instala ao lado
+# da versao oficial sem desinstalar nem misturar certificados.
+debug_manifest = android / 'app/src/debug/AndroidManifest.xml'
+debug_manifest.parent.mkdir(parents=True, exist_ok=True)
+debug_manifest.write_text(
+    '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\\n'
+    '    <application android:label="LinguaFlow DEV" />\\n'
+    '</manifest>\\n',
+    encoding='utf-8',
+)
+
 # Template do Flutter recente usa Kotlin DSL (build.gradle.kts). Configure SDKs.
 for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
     if not p.exists():
@@ -31,6 +42,15 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
     # APKs oficiais usam a mesma chave guardada apenas em GitHub Secrets.
     # APKs experimentais continuam com a chave debug do Flutter.
     if p.suffix == '.kts':
+        if 'applicationIdSuffix = ".dev"' not in build:
+            marker = '    buildTypes {'
+            if marker not in build:
+                raise SystemExit('Nao foi encontrado buildTypes no Gradle Kotlin DSL.')
+            build = build.replace(marker, marker + """
+        getByName("debug") {
+            applicationIdSuffix = ".dev"
+        }
+""", 1)
         if 'linguaflowRelease' not in build:
             marker = '    buildTypes {'
             if marker not in build:
