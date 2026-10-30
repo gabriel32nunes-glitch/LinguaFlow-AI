@@ -8,6 +8,7 @@ import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'work_phrases.dart';
+import 'retail_assistant.dart';
 import 'language_direction.dart';
 import 'device_profile.dart';
 import 'voice_aura.dart';
@@ -708,8 +709,10 @@ class TranslationController extends ChangeNotifier {
         final local = voice['network_required'] == false ||
             voice['network_required']?.toString().toLowerCase() == 'false';
         if (local && voice['name'] != null) {
-          if (locale.startsWith('pt')) _voices.putIfAbsent('pt', () => voice);
-          if (locale.startsWith('en')) _voices.putIfAbsent('en', () => voice);
+          final language = getLinguaLanguage(locale);
+          if (language != null) {
+            _voices.putIfAbsent(language.code, () => voice);
+          }
         }
       }
     }
@@ -967,6 +970,90 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
+  /// Resposta de atendimento: sempre com microfone parado para evitar eco.
+  /// O texto em portugues e confirmado pelo atendente antes da fala.
+  /// Ingles pronto funciona mesmo sem modelos ML Kit; outros idiomas
+  /// exigem os pacotes instalados e uma voz local disponivel.
+  Future<bool> speakRetailResponse(String pt, {String? preparedEnglish}) async {
+    final input = pt.trim();
+    if (running || busy || input.isEmpty) return false;
+    final target = getLinguaLanguage(selectedSource);
+    if (target == null || target.code == 'pt') {
+      warning = 'Selecione o idioma do cliente para responder.';
+      _update();
+      return false;
+    }
+    busy = true;
+    warning = null;
+    status = 'Preparando resposta para ${target.name}…';
+    _update();
+    OnDeviceTranslator? translator;
+    try {
+      String result;
+      if (target.code == 'en' && preparedEnglish != null) {
+        result = preparedEnglish;
+      } else {
+        for (final language in [getLinguaLanguage('pt')!, target]) {
+          final available = await _models.isModelDownloaded(
+            language.translateCode.bcpCode,
+          ).timeout(const Duration(seconds: 12));
+          if (!available) {
+            warning = 'Prepare os modelos de português e ${target.name} '
+                'na Biblioteca de idiomas antes de falar uma resposta livre.';
+            status = 'Pacote de tradução ausente';
+            return false;
+          }
+        }
+        translator = OnDeviceTranslator(
+          sourceLanguage: TranslateLanguage.portuguese,
+          targetLanguage: target.translateCode,
+        );
+        result = await translator.translateText(input)
+            .timeout(const Duration(seconds: 25));
+      }
+      original = input;
+      portuguese = input;
+      english = result; // Campo da resposta, no idioma escolhido pelo cliente.
+      history.insert(0, TranslationTurn(
+        source: input, translation: result, fromEnglish: false,
+      ));
+      if (history.length > 8) history.removeRange(8, history.length);
+      status = 'Resposta traduzida para ${target.name}';
+      _update();
+
+      await _initializeVoices().timeout(const Duration(seconds: 15));
+      final voice = _voices[target.code];
+      if (voice == null) {
+        warning = 'Resposta traduzida, mas não há voz offline '
+            'de ${target.name} no celular. Mostre o texto ao cliente.';
+        return true;
+      }
+      speaking = true;
+      status = 'Falando com o cliente em ${target.name}…';
+      _update();
+      final locale = voice['locale'].toString().replaceAll('_', '-');
+      await _tts.setLanguage(locale);
+      await _tts.setVoice({
+        'name': voice['name'].toString(),
+        'locale': voice['locale'].toString(),
+      });
+      await _tts.speak(result).timeout(const Duration(seconds: 45));
+      return true;
+    } on TimeoutException {
+      warning = 'A tradução ou a voz não respondeu a tempo. '
+          'Confira a resposta na tela.';
+      return false;
+    } catch (e) {
+      warning = 'Não foi possível preparar a resposta: $e';
+      return false;
+    } finally {
+      translator?.close();
+      speaking = false;
+      busy = false;
+      _update();
+    }
+  }
+
   Future<void> stop() async {
     running = false;
     busy = false;
@@ -1019,6 +1106,10 @@ class _TranslationPageState extends State<TranslationPage> {
   bool consent = false;
   String phraseCategory = 'Todos';
   String phraseQuery = '';
+  bool _retailMode = true;
+  bool _retailReplyBusy = false;
+  String? _retailFeedback;
+  final TextEditingController _retailInput = TextEditingController();
   final TextEditingController _textInput = TextEditingController();
   final LinguaFlowUpdater _updater = LinguaFlowUpdater();
   LinguaFlowRelease? _newVersion;
@@ -1084,6 +1175,7 @@ class _TranslationPageState extends State<TranslationPage> {
   void dispose() {
     controller.removeListener(_refresh);
     _textInput.dispose();
+    _retailInput.dispose();
     controller.dispose();
     super.dispose();
   }
@@ -1097,6 +1189,40 @@ class _TranslationPageState extends State<TranslationPage> {
       );
     } else {
       await controller.start(microphoneOnly: microphoneOnly);
+    }
+  }
+
+  Future<void> _sendRetailReply(String pt, {String? preparedEnglish}) async {
+    if (_retailReplyBusy || controller.busy) return;
+    final wasListening = controller.running;
+    setState(() {
+      _retailReplyBusy = true;
+      _retailFeedback = null;
+    });
+    try {
+      // Interromper a captura antes do TTS impede que o Whisper
+      // transcreva a propria voz do aplicativo.
+      if (wasListening) await controller.stop();
+      final translated = await controller.speakRetailResponse(
+        pt, preparedEnglish: preparedEnglish,
+      );
+      if (!translated) {
+        _retailFeedback = controller.warning ??
+            'Não foi possível traduzir a resposta.';
+      } else if (controller.warning != null) {
+        _retailFeedback = controller.warning;
+      }
+      if (wasListening && consent && mounted) {
+        await controller.start();
+        if (!controller.running) {
+          _retailFeedback = controller.warning ??
+              'Não foi possível retomar o microfone.';
+        }
+      }
+    } catch (e) {
+      _retailFeedback = 'Erro no atendimento: $e';
+    } finally {
+      if (mounted) setState(() => _retailReplyBusy = false);
     }
   }
 
@@ -1158,7 +1284,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 const SizedBox(height: 5),
                 Text(controller.tvMode
                     ? 'MODO VÍDEO / TELEVISÃO'
-                    : 'CONVERSA SEM BARREIRAS',
+                    : _retailMode ? 'ATENDIMENTO EM LOJA' : 'CONVERSA SEM BARREIRAS',
                     style: const TextStyle(fontSize: 16, letterSpacing: 0.7,
                         fontWeight: FontWeight.w900)),
                 VoiceAura(
@@ -1211,6 +1337,30 @@ class _TranslationPageState extends State<TranslationPage> {
               ]),
             ),
             const SizedBox(height: 15),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _retailMode,
+              onChanged: running || controller.busy || _retailReplyBusy
+                  ? null : (enabled) {
+                if (enabled) {
+                  controller.setTvMode(false);
+                  if (controller.selectedSource == 'pt') {
+                    controller.selectSource('en');
+                  }
+                  controller.selectTarget('pt');
+                }
+                setState(() {
+                  _retailMode = enabled;
+                  _retailFeedback = null;
+                });
+              },
+              title: const Text('Modo atendimento em loja',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Escutar o cliente, sugerir respostas '
+                  'de vendas e falar no idioma dele.'),
+              secondary: const Icon(Icons.storefront_outlined,
+                  color: Color(0xFF62F0D2)),
+            ),
             if (controller.useWhisper) SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: controller.autoDetectSpeech,
@@ -1226,8 +1376,11 @@ class _TranslationPageState extends State<TranslationPage> {
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: controller.tvMode,
-              onChanged: running || controller.busy
-                  ? null : controller.setTvMode,
+              onChanged: running || controller.busy || _retailReplyBusy
+                  ? null : (enabled) {
+                    if (enabled) setState(() => _retailMode = false);
+                    controller.setTvMode(enabled);
+                  },
               title: const Text('Modo Vídeo/TV · Inglês → Português',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
               subtitle: const Text(
@@ -1248,12 +1401,14 @@ class _TranslationPageState extends State<TranslationPage> {
               dense: true,
             ),
             FilledButton.icon(
-              onPressed: controller.busy ? null : () => _toggle(),
+              onPressed: controller.busy || _retailReplyBusy
+                  ? null : () => _toggle(),
               icon: Icon(running ? Icons.stop_circle_rounded
                   : Icons.mic_rounded, size: 23),
               label: Text(controller.busy ? 'PREPARANDO…' :
                   running ? 'ENCERRAR CONVERSA' :
-                  controller.tvMode ? 'ESCUTAR TV EM INGLÊS' : 'INICIAR CONVERSA'),
+                  controller.tvMode ? 'ESCUTAR TV EM INGLÊS' :
+                  _retailMode ? 'INICIAR ATENDIMENTO' : 'INICIAR CONVERSA'),
               style: FilledButton.styleFrom(
                 backgroundColor: running
                     ? const Color(0xFFFF869E) : accent,
@@ -1266,6 +1421,140 @@ class _TranslationPageState extends State<TranslationPage> {
                     letterSpacing: 1.1),
               ),
             ),
+            if (_retailMode) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF12243A),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFF28566A)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.storefront_rounded,
+                          color: Color(0xFF58F1D0)),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('ASSISTENTE DE VENDAS',
+                          style: TextStyle(fontWeight: FontWeight.w900))),
+                    ]),
+                    const SizedBox(height: 8),
+                    const Text('Idioma do cliente e das respostas:',
+                        style: TextStyle(color: Color(0xFFB7CCDC), fontSize: 12)),
+                    DropdownButton<String>(
+                      isExpanded: true,
+                      value: controller.selectedSource == 'pt'
+                          ? 'en' : controller.selectedSource,
+                      items: [
+                        for (final language in linguaLanguages)
+                          if (language.code != 'pt')
+                            DropdownMenuItem(
+                              value: language.code,
+                              child: Text(language.name),
+                            ),
+                      ],
+                      onChanged: running || controller.busy || _retailReplyBusy
+                          ? null : (code) {
+                            if (code != null) {
+                              controller.selectSource(code);
+                              controller.selectTarget('pt');
+                            }
+                          },
+                    ),
+                    const Text('As sugestões são frases predefinidas: '
+                        'não inventam preços, estoque ou descontos.',
+                        style: TextStyle(
+                            color: Color(0xFFB7CCDC), fontSize: 11)),
+                    const SizedBox(height: 12),
+                    Text(controller.history.isNotEmpty &&
+                            controller.history.first.fromEnglish
+                        ? 'Sugestões para a última fala do cliente'
+                        : 'Respostas rápidas para começar',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    for (final reply in suggestRetailReplies(
+                      controller.history.isNotEmpty &&
+                              controller.history.first.fromEnglish
+                          ? controller.history.first.translation
+                          : controller.original,
+                    ))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 7),
+                        child: OutlinedButton(
+                          onPressed: controller.busy || _retailReplyBusy
+                              ? null : () => _sendRetailReply(
+                                  reply.pt, preparedEnglish: reply.en),
+                          style: OutlinedButton.styleFrom(
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 12),
+                            side: const BorderSide(color: Color(0xFF326070)),
+                          ),
+                          child: Row(children: [
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(reply.pt, style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(reply.en, style: const TextStyle(
+                                    fontSize: 11, color: Color(0xFFB6C7D6))),
+                              ],
+                            )),
+                            const Icon(Icons.volume_up_rounded,
+                                color: Color(0xFF58F1D0)),
+                          ]),
+                        ),
+                      ),
+                    const SizedBox(height: 9),
+                    TextField(
+                      controller: _retailInput,
+                      maxLines: 3,
+                      minLines: 1,
+                      decoration: const InputDecoration(
+                        labelText: 'Sua resposta em português',
+                        hintText: 'Ex.: Vou verificar esse produto para você.',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.edit_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: controller.busy || _retailReplyBusy
+                          ? null : () {
+                            final text = _retailInput.text.trim();
+                            if (text.isNotEmpty) _sendRetailReply(text);
+                          },
+                      icon: const Icon(Icons.translate_rounded),
+                      label: Text(_retailReplyBusy
+                          ? 'AGUARDE…' : 'TRADUZIR E FALAR PARA O CLIENTE'),
+                    ),
+                    if (_retailFeedback != null) ...[
+                      const SizedBox(height: 7),
+                      Text(_retailFeedback!,
+                          style: const TextStyle(
+                              color: Color(0xFFFFCF91), fontSize: 12)),
+                    ],
+                    const SizedBox(height: 8),
+                    const Text('Ao responder, o microfone pausa para evitar eco '
+                        'e tenta retomar a escuta automaticamente. '
+                        'Voz offline depende das vozes instaladas no Android; '
+                        'o texto traduzido continua visível.',
+                        style: TextStyle(
+                            color: Color(0xFF91ABBE), fontSize: 11)),
+                    if (!running && !controller.busy)
+                      TextButton.icon(
+                        onPressed: controller.prepareModels,
+                        icon: const Icon(Icons.download_rounded),
+                        label: const Text('Preparar tradução inglês/português'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(children: [
               const Icon(Icons.memory_rounded, size: 15,
@@ -1357,7 +1646,7 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             const SizedBox(height: 12),
             _TranslationCard(
-              heading: '🇧🇷 Português → Inglês',
+              heading: '🇧🇷 Português → ${getLinguaLanguage(controller.selectedSource)?.name ?? 'Inglês'}',
               subtitle: 'Sua resposta traduzida',
               translated: controller.english,
               placeholder: 'Sua resposta aparecerá aqui…',
