@@ -1534,7 +1534,7 @@ class _TranslationPageState extends State<TranslationPage> {
                           },
                       icon: const Icon(Icons.translate_rounded),
                       label: Text(_retailReplyBusy
-                          ? 'AGUARDE…' : 'TRADUZIR E FALAR PARA O CLIENTE'),
+                          ? 'AGUARDE…' : 'TRADUZIR E FALAR'),
                     ),
                     if (_retailFeedback != null) ...[
                       const SizedBox(height: 7),
