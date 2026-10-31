@@ -206,22 +206,6 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                   unawaited(controller.prepareModels());
                 },
               ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.hearing_rounded,
-                    color: Color(0xFF48D8FF)),
-                title: const Text('Testar somente o microfone'),
-                subtitle: const Text('Reconhece a fala sem traduzir.'),
-                enabled: !controller.running && !controller.busy,
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  if (!_microphoneConsent) {
-                    await _toggleListening();
-                  } else {
-                    await controller.start(microphoneOnly: true);
-                  }
-                },
-              ),
               Text(controller.packFeedback,
                   style: const TextStyle(
                       fontSize: 12, color: Color(0xFF9FB7D3))),
@@ -345,6 +329,14 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
     final reply = _lastReply;
     final language = getLinguaLanguage(controller.selectedSource);
     final lastText = controller.partial.trim();
+    final heardIsCustomer = controller.heardText.trim().isNotEmpty &&
+        controller.heardLanguage.isNotEmpty &&
+        !controller.heardLanguage.toLowerCase().startsWith('pt');
+    final latestCustomerSpeech = heardIsCustomer
+        ? controller.heardText : customer?.source;
+    final latestTranslation = customer != null &&
+            customer.source == latestCustomerSpeech
+        ? customer.translation : null;
     final statusActive = controller.running || controller.speaking;
     final small = MediaQuery.sizeOf(context).height < 740;
     final mascotHeight = small ? 192.0 : 244.0;
@@ -475,7 +467,7 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                           ? '🇺🇸' : '🌐',
                       text: lastText.isNotEmpty
                           ? lastText
-                          : customer?.source ??
+                          : latestCustomerSpeech ??
                               'A fala do cliente aparece aqui.',
                       highlighted: false,
                     ),
@@ -483,7 +475,7 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                     _SpeechPanel(
                       label: 'TRADUÇÃO · PORTUGUÊS',
                       symbol: '🇧🇷',
-                      text: customer?.translation ??
+                      text: latestTranslation ??
                           'A tradução aparece aqui automaticamente.',
                       highlighted: true,
                     ),
@@ -515,8 +507,8 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                     ],
                     const SizedBox(height: 10),
                     Text(
-                      controller.running
-                          ? 'Escuta contínua ativa. Toque no microfone para parar.'
+                      controller.running || controller.busy
+                          ? controller.status
                           : 'Toque no microfone para começar.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
