@@ -19,6 +19,7 @@ import 'update_service.dart';
 
 part 'zeluvori_home.dart';
 part 'zelu_mascot.dart';
+part 'product_visual_3d.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
