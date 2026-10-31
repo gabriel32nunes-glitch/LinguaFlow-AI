@@ -183,9 +183,15 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF0C1830),
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Padding(
           padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -253,6 +259,8 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                 style: TextStyle(fontSize: 12, color: Color(0xFF9FB7D3)),
               ),
             ],
+          ),
+            ),
           ),
         ),
       ),
