@@ -850,7 +850,7 @@ class _ZeluPainter extends CustomPainter {
     // A linha horizontal reage ao estado de escuta e fala.
     for (var i = -16; i <= 16; i++) {
       final x = i * 9.4;
-      final height = (speaking ? 24 : listening ? 15 : 6) *
+      final height = (speaking ? 24 : listening ? (hasSpeech ? 23 : 15) : 6) *
           (0.35 + 0.65 * math.sin(i * 1.8 + t * 2).abs());
       canvas.drawLine(
         Offset(x, 104 - height / 2),
@@ -916,16 +916,24 @@ class _ZeluPainter extends CustomPainter {
       ..strokeWidth = 5.5
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
-    canvas.drawArc(
-      Rect.fromCenter(
-          center: const Offset(-34, -14), width: 28, height: 19),
-      math.pi, math.pi, false, face,
-    );
-    canvas.drawArc(
-      Rect.fromCenter(
-          center: const Offset(34, -14), width: 28, height: 19),
-      math.pi, math.pi, false, face,
-    );
+    final blinking = phase > 0.48 && phase < 0.52 && !speaking;
+    if (blinking) {
+      canvas.drawLine(const Offset(-46, -14),
+          const Offset(-22, -14), face);
+      canvas.drawLine(const Offset(22, -14),
+          const Offset(46, -14), face);
+    } else {
+      canvas.drawArc(
+        Rect.fromCenter(
+            center: const Offset(-34, -14), width: 28, height: 19),
+        math.pi, math.pi, false, face,
+      );
+      canvas.drawArc(
+        Rect.fromCenter(
+            center: const Offset(34, -14), width: 28, height: 19),
+        math.pi, math.pi, false, face,
+      );
+    }
     if (speaking) {
       canvas.drawOval(
         Rect.fromCenter(
@@ -950,7 +958,7 @@ class _ZeluPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
     final wave = math.sin(t * (speaking ? 2 : 1)) *
-        (speaking ? 13 : 5);
+        (speaking ? 13 : listening && hasSpeech ? 9 : 5);
     final shoulder = const Offset(60, 80);
     final elbow = Offset(102, 52 + wave);
     final fingertip = Offset(126, 18 + wave);
