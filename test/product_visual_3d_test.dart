@@ -75,6 +75,8 @@ void main() {
     expect(find.text('VITRINE 3D'), findsOneWidget);
     expect(find.text('Camiseta'), findsOneWidget);
     expect(find.text('Mochila'), findsOneWidget);
+    await tester.ensureVisible(find.text('Mochila'));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('Mochila'));
     await tester.pump(const Duration(milliseconds: 450));
     expect(find.byType(ShopVisual3D), findsOneWidget);
