@@ -1,6 +1,6 @@
-# Testar o LinguaFlow no Samsung Galaxy A14 pelo VS Code (Windows)
+# Testar o Zeluvori no Samsung Galaxy A14 pelo VS Code (Windows)
 
-**Objetivo:** usar o Galaxy A14 4G como aparelho de testes, espelhando sua tela no PC, sem baixar APKs do GitHub a cada alteração. O Flutter instala a versão de desenvolvimento diretamente pelo cabo USB. A versão **LinguaFlow DEV** tem identificador separado e não desinstala a versão oficial.
+**Objetivo:** usar o Galaxy A14 4G como aparelho de testes, espelhando sua tela no PC, sem baixar APKs do GitHub a cada alteração. O Flutter instala a versão de desenvolvimento diretamente pelo cabo USB. A versão **Zeluvori DEV** tem identificador separado e não desinstala a versão oficial.
 
 ## 1. Preparar celular e computador (uma vez)
 
@@ -46,7 +46,7 @@ Se aparecer mais de um dispositivo, use o identificador exibido:
 flutter run -d ID_DO_GALAXY
 ```
 
-O aplicativo **LinguaFlow DEV** será instalado pelo Flutter e poderá coexistir com o LinguaFlow oficial. **Não desinstale o aplicativo oficial para testar.**
+O aplicativo **Zeluvori DEV** será instalado pelo Flutter e poderá coexistir com o Zeluvori oficial. **Não desinstale o aplicativo oficial para testar.**
 
 Com `flutter run` aberto:
 - **`r`**: Hot Reload para alterações compatíveis de código Flutter/Dart.
@@ -55,17 +55,18 @@ Com `flutter run` aberto:
 
 Alterações em código nativo, plugins ou configurações Android podem exigir uma nova compilação com `flutter run`; isso não exige baixar um APK manualmente.
 
-## 5. Teste real de atendimento em loja
+## 5. Teste da nova tela Zeluvori
 
-1. Abra **LinguaFlow DEV** e permita o microfone.
-2. Ative **Modo atendimento em loja**, selecione **Inglês** e confirme que as pessoas sabem que o microfone está ligado.
-3. Prepare os modelos de tradução **português/inglês** no próprio aplicativo, com internet na primeira vez.
-4. Toque em **Iniciar atendimento** e peça a alguém para falar: **“How much does this cost?”**. Verifique o texto reconhecido e a tradução em português.
-5. Toque na sugestão **“Vou confirmar o preço para você.”**. O aplicativo interrompe a escuta antes de falar, tenta reproduzir em inglês e retomar a escuta.
-6. Digite em português **“Posso mostrar outras opções.”** e toque em **Traduzir e falar para o cliente**.
-7. Repita com barulho de loja e diferentes distâncias do microfone.
+1. Abra **Zeluvori DEV**. Na tela inicial, veja o mascote Zelu e o botão grande de microfone.
+2. Selecione **Inglês** no cartão **Cliente fala**.
+3. Avise o cliente sobre o microfone e toque no botão **Iniciar**. Permita o acesso quando solicitado.
+4. Peça a alguém que diga **“How much does this cost?”**. Veja a fala original e a tradução em português.
+5. Em **Configurações**, use **Preparar português e inglês** se os modelos ML Kit estiverem ausentes.
+6. Em **Sugestões**, selecione **“Vou confirmar o preço para você.”** para testar o TTS em inglês. O mascote abre a boca e se move durante a fala, quando houver voz offline disponível.
+7. Em **Teclado**, escreva uma resposta em português e toque em **Traduzir e falar**.
+8. Verifique se o microfone retoma a escuta após a resposta e se não há eco.
 
-**Limitações importantes:** a tradução por trechos não é simultânea sem atraso; o Galaxy A14 pode demorar para transcrever com Whisper. A voz depende de TTS offline instalado no Android. O app não deve inventar preço, estoque, descontos ou prazos. Para outros idiomas, instale o pacote de tradução correspondente; algumas vozes offline podem não existir no celular. O aplicativo não grava áudio para histórico por padrão.
+O mascote é animado por código Flutter, sem depender de uma imagem. A fala TTS depende de voz offline do Android. As sugestões são predefinidas, não uma IA generativa.
 
 ## 6. Quando houver bug
 
