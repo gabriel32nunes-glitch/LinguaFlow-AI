@@ -37,9 +37,10 @@ void main() {
     await tester.pumpWidget(const LinguaFlowApp());
     await tester.pump();
 
-    expect(find.textContaining('INTERPRETE FUTURISTA · V0.9'), findsOneWidget);
-    expect(find.textContaining('Pronto para iniciar'), findsOneWidget);
-    // O interruptor de economia fica abaixo da dobra da lista dinamica.
-    // Sua logica de limites e validada em device_profile_test.dart.
+    expect(find.text('ZELUVORI'), findsOneWidget);
+    expect(find.text('PRONTO PARA CONVERSAR'), findsOneWidget);
+    expect(find.byType(ZeluvoriMascot), findsOneWidget);
+    // A tela principal permanece enxuta e nao inicia downloads sozinha.
+    // A logica de limites segue coberta por device_profile_test.dart.
   });
 }
