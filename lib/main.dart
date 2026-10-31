@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,8 @@ import 'language_library.dart';
 import 'local_whisper_voice.dart';
 import 'update_service.dart';
 
+part 'zeluvori_home.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const LinguaFlowApp());
@@ -26,7 +29,7 @@ class LinguaFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'LinguaFlow AI',
+        title: 'Zeluvori AI',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
@@ -37,7 +40,7 @@ class LinguaFlowApp extends StatelessWidget {
             brightness: Brightness.dark,
           ),
         ),
-        home: const TranslationPage(),
+        home: const ZeluvoriHome(),
       );
 }
 
@@ -836,7 +839,11 @@ class TranslationController extends ChangeNotifier {
               .timeout(const Duration(seconds: 8));
         }
         final source = getLinguaLanguage(language);
-        final target = getLinguaLanguage(selectedTarget);
+        // Traducao bilateral: fala do cliente -> portugues;
+        // fala em portugues -> idioma selecionado do cliente.
+        final target = getLinguaLanguage(
+          source?.code == 'pt' ? selectedSource : 'pt',
+        );
         if (source == null || target == null) {
           status = 'Idioma detectado fora do catálogo; transcrição disponível.';
           _update();
