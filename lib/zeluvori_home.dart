@@ -53,7 +53,8 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
             'O microfone capta as pessoas perto do celular. '
             'Avise o cliente antes de começar. '
             'O reconhecimento Whisper funciona no aparelho; '
-            'os modelos de tradução podem precisar de download inicial.',
+            'os modelos de tradução podem precisar de download inicial. '
+            'Se não houver voz offline, a voz do sistema poderá usar internet.',
           ),
           actions: [
             TextButton(
