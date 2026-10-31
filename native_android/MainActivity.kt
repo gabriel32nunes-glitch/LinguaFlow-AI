@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -101,6 +102,19 @@ class MainActivity : FlutterActivity() {
                             handler.postDelayed(retryRunnable, 350L)
                         }
                         reply.success(null)
+                    }
+                    "installTtsData" -> {
+                        try {
+                            val install = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)
+                            if (install.resolveActivity(packageManager) != null) {
+                                startActivity(install)
+                                reply.success(true)
+                            } else {
+                                reply.success(false)
+                            }
+                        } catch (e: Exception) {
+                            reply.success(false)
+                        }
                     }
                     "stop" -> {
                         stopSession()
