@@ -2,13 +2,15 @@
 # Testa instalacao e inicializacao, NAO valida traducao nem microfone.
 set -euo pipefail
 
-APP_ID="com.example.linguaflow_ai"
+APP_ID="com.example.linguaflow_ai.dev"
 APK="build/app/outputs/flutter-apk/app-debug.apk"
 mkdir -p ci-artifacts
 
 adb install -r "$APK"
 adb logcat -c
-adb shell am start -n "$APP_ID/.MainActivity" | tee ci-artifacts/launch.txt
+# O applicationId de debug termina em .dev, mas a classe Kotlin permanece
+# no namespace original com.example.linguaflow_ai.
+adb shell am start -n "$APP_ID/com.example.linguaflow_ai.MainActivity" | tee ci-artifacts/launch.txt
 sleep 12
 
 adb shell dumpsys activity activities > ci-artifacts/activities.txt

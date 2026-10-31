@@ -15,6 +15,18 @@ kotlin_file.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(root / 'native_android/MainActivity.kt', kotlin_file)
 shutil.copy2(root / 'native_android/AndroidManifest.xml', manifest)
 
+# O app de desenvolvimento usa outro ID e outro nome: instala ao lado
+# da versao oficial sem desinstalar nem misturar certificados.
+debug_manifest = android / 'app/src/debug/AndroidManifest.xml'
+debug_manifest.parent.mkdir(parents=True, exist_ok=True)
+debug_manifest.write_text(
+    '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+    'xmlns:tools="http://schemas.android.com/tools">\n'
+    '    <application android:label="Zeluvori DEV" tools:replace="android:label" />\n'
+    '</manifest>\n',
+    encoding='utf-8',
+)
+
 # Template do Flutter recente usa Kotlin DSL (build.gradle.kts). Configure SDKs.
 for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
     if not p.exists():
@@ -28,9 +40,41 @@ for p in (android / 'app/build.gradle.kts', android / 'app/build.gradle'):
         build = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', build)
         build = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 31', build)
         build = re.sub(r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35', build)
+    # Whisper requer NDK 29. O template Flutter pode escolher uma versao anterior.
+    # Mantem a configuracao idempotente para Kotlin DSL e Gradle Groovy.
+    required_ndk = '29.0.13113456'
+    if p.suffix == '.kts':
+        ndk_pattern = r'(?m)^([ \t]*)ndkVersion\s*=\s*[^\r\n]+'
+        ndk_line = f'ndkVersion = "{required_ndk}"'
+        sdk_pattern = r'(?m)^([ \t]*)compileSdk\s*=\s*[^\r\n]+'
+    else:
+        ndk_pattern = r'(?m)^([ \t]*)ndkVersion\s+(?:=\s*)?[^\r\n]+'
+        ndk_line = f'ndkVersion "{required_ndk}"'
+        sdk_pattern = r'(?m)^([ \t]*)compileSdkVersion\s+[^\r\n]+'
+    if re.search(ndk_pattern, build):
+        build = re.sub(ndk_pattern, lambda m: m.group(1) + ndk_line, build, count=1)
+    else:
+        build, matches = re.subn(
+            sdk_pattern,
+            lambda m: m.group(0) + '\n' + m.group(1) + ndk_line,
+            build,
+            count=1,
+        )
+        if matches != 1:
+            raise SystemExit('Nao foi possivel configurar ndkVersion em ' + str(p))
+
     # APKs oficiais usam a mesma chave guardada apenas em GitHub Secrets.
     # APKs experimentais continuam com a chave debug do Flutter.
     if p.suffix == '.kts':
+        if 'applicationIdSuffix = ".dev"' not in build:
+            marker = '    buildTypes {'
+            if marker not in build:
+                raise SystemExit('Nao foi encontrado buildTypes no Gradle Kotlin DSL.')
+            build = build.replace(marker, marker + """
+        getByName("debug") {
+            applicationIdSuffix = ".dev"
+        }
+""", 1)
         if 'linguaflowRelease' not in build:
             marker = '    buildTypes {'
             if marker not in build:
@@ -77,6 +121,6 @@ for old in (android / 'app/src/main/kotlin').rglob('MainActivity.kt'):
     if 'class MainActivity: FlutterActivity()' in content and len(content) < 300:
         old.unlink()
 
-print('Android configurado: SDK 31+ (recursos automáticos 34+), MainActivity e permissões.')
+print('Zeluvori configurado: SDK 31+ (recursos automáticos 34+), MainActivity e permissoes.')
 print('Execute: flutter pub get')
 print('Depois: flutter run')

@@ -5,9 +5,10 @@
     <queries>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+        <intent><action android:name="android.speech.tts.engine.INSTALL_TTS_DATA" /></intent>
     </queries>
     <application
-        android:label="LinguaFlow AI Grátis"
+        android:label="Zeluvori AI"
         android:name="${applicationName}">
         <activity
             android:name=".MainActivity"

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -8,12 +9,17 @@ import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'work_phrases.dart';
+import 'retail_assistant.dart';
 import 'language_direction.dart';
 import 'device_profile.dart';
 import 'voice_aura.dart';
 import 'language_library.dart';
 import 'local_whisper_voice.dart';
 import 'update_service.dart';
+
+part 'zeluvori_home.dart';
+part 'zelu_mascot.dart';
+part 'product_visual_3d.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +31,7 @@ class LinguaFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'LinguaFlow AI',
+        title: 'Zeluvori AI',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
@@ -36,7 +42,7 @@ class LinguaFlowApp extends StatelessWidget {
             brightness: Brightness.dark,
           ),
         ),
-        home: const TranslationPage(),
+        home: const ZeluvoriHome(),
       );
 }
 
@@ -106,6 +112,9 @@ class TranslationController extends ChangeNotifier {
   String portuguese = '';
   String english = '';
   String original = '';
+  // Ultima fala reconhecida, mesmo quando falta o modelo de traducao.
+  String heardText = '';
+  String heardLanguage = '';
   String? warning;
 
   void _update() {
@@ -694,28 +703,214 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
+  /// TTS: tenta primeiro voz local; se o Android nao marcar nenhuma voz
+  /// como offline, tenta o sintetizador padrao do aparelho.
+  /// O segundo caminho pode precisar de internet, mas nao usa API paga do app.
   Future<void> _initializeVoices() async {
-    // Apenas vozes explicitamente declaradas offline pelo mecanismo Android.
     await _tts.awaitSpeakCompletion(true);
-    await _tts.setSpeechRate(0.49);
-    final allVoices = await _tts.getVoices;
+    await _tts.setSpeechRate(0.48);
+    await _tts.setPitch(1.07);
+    await _tts.setVolume(1.0);
     _voices.clear();
-    if (allVoices is List) {
-      for (final item in allVoices) {
-        if (item is! Map) continue;
-        final voice = item.map((key, value) => MapEntry(key.toString(), value));
-        final locale = voice['locale']?.toString().replaceAll('_', '-').toLowerCase() ?? '';
-        final local = voice['network_required'] == false ||
-            voice['network_required']?.toString().toLowerCase() == 'false';
-        if (local && voice['name'] != null) {
-          if (locale.startsWith('pt')) _voices.putIfAbsent('pt', () => voice);
-          if (locale.startsWith('en')) _voices.putIfAbsent('en', () => voice);
+    try {
+      final allVoices = await _tts.getVoices;
+      if (allVoices is List) {
+        for (final item in allVoices) {
+          if (item is! Map) continue;
+          final voice = item.map(
+              (key, value) => MapEntry(key.toString(), value));
+          final locale = voice['locale']?.toString()
+                  .replaceAll('_', '-').toLowerCase() ?? '';
+          final networkFlag = voice['network_required'] ??
+              voice['networkRequired'] ??
+              voice['requiresNetworkConnection'];
+          final local = networkFlag == false ||
+              networkFlag?.toString().toLowerCase() == 'false';
+          final language = getLinguaLanguage(locale);
+          if (local && language != null && voice['name'] != null) {
+            _voices.putIfAbsent(language.code, () => voice);
+          }
         }
       }
+    } catch (_) {
+      // Alguns motores Android nao enumeram as vozes. Ainda assim podem
+      // falar com setLanguage + speak; nao bloquear o usuario.
     }
-    if (_voices.length < 2) {
-      warning = 'Uma voz offline PT/EN não foi encontrada. As legendas continuam disponíveis. '
-          'Instale vozes offline nas opções de texto para fala do Android.';
+  }
+
+  static const Map<String, List<String>> _ttsLocales = {
+    'en': ['en-US', 'en-GB', 'en-AU'],
+    'pt': ['pt-BR', 'pt-PT'],
+    'es': ['es-ES', 'es-MX'],
+    'fr': ['fr-FR', 'fr-CA'],
+    'zh': ['zh-CN', 'zh-TW'],
+    'hi': ['hi-IN'],
+    'ar': ['ar-SA'],
+    'bn': ['bn-BD'],
+    'id': ['id-ID'],
+    'ur': ['ur-PK'],
+  };
+
+  /// Retorna true apenas quando o sintetizador informa que terminou a fala.
+  /// Se a voz offline nao existir, tenta o TTS padrao do Android.
+  Future<bool> _speakWithSystemFallback(
+    String text, String languageCode,
+  ) async {
+    if (text.trim().isEmpty) return false;
+    await _initializeVoices().timeout(const Duration(seconds: 15));
+    final offline = _voices[languageCode];
+    final attempts = <String>[];
+    if (offline != null) {
+      final locale = offline['locale'].toString().replaceAll('_', '-');
+      try {
+        final setResult = await _tts.setLanguage(locale);
+        if (setResult is num && setResult < 0) {
+          throw StateError('Idioma $locale nao disponivel');
+        }
+        await _tts.setVoice({
+          'name': offline['name'].toString(),
+          'locale': offline['locale'].toString(),
+        });
+        final spoken = await _tts.speak(text)
+            .timeout(const Duration(seconds: 55));
+        if (spoken != 0 && spoken != false) {
+          warning = null;
+          return true;
+        }
+        attempts.add('Voz offline $locale nao reproduziu.');
+      } catch (error) {
+        attempts.add('Voz offline: $error');
+        try {
+          await _tts.stop();
+        } catch (_) {}
+      }
+    }
+
+    // Usar setLanguage SEM setVoice permite que o Android escolha a
+    // propria voz, inclusive quando o plugin nao a marca como offline.
+    for (final locale in _ttsLocales[languageCode] ?? [languageCode]) {
+      try {
+        final available = await _tts.isLanguageAvailable(locale);
+        if (available == false ||
+            (available is num && available < 0)) {
+          continue;
+        }
+        final selected = await _tts.setLanguage(locale);
+        if (selected == false ||
+            (selected is num && selected < 0)) {
+          continue;
+        }
+        final spoken = await _tts.speak(text)
+            .timeout(const Duration(seconds: 55));
+        if (spoken == 0 || spoken == false) {
+          attempts.add('Motor Android recusou $locale.');
+          continue;
+        }
+        warning = 'Voz do sistema Android utilizada ($locale). '
+            'Dependendo do motor de voz, a reproducao pode usar internet.';
+        return true;
+      } catch (error) {
+        attempts.add('$locale: $error');
+        try {
+          await _tts.stop();
+        } catch (_) {}
+      }
+    }
+    // Alguns Galaxy usam Samsung TTS como padrao, mas tambem possuem
+    // Speech Services by Google. Tentar os motores instalados no app,
+    // sem alterar a preferencia global do telefone.
+    try {
+      final availableEngines = await _tts.getEngines;
+      if (availableEngines is List) {
+        final engines = availableEngines
+            .map((engine) => engine.toString())
+            .where((engine) => engine.isNotEmpty)
+            .toList();
+        engines.sort((a, b) {
+          final aGoogle = a.toLowerCase().contains('google') ? 0 : 1;
+          final bGoogle = b.toLowerCase().contains('google') ? 0 : 1;
+          return aGoogle.compareTo(bGoogle);
+        });
+        for (final engine in engines.take(3)) {
+          try {
+            await _tts.setEngine(engine);
+            await _tts.awaitSpeakCompletion(true);
+          } catch (_) {
+            continue;
+          }
+          for (final locale in _ttsLocales[languageCode] ?? [languageCode]) {
+            try {
+              final available = await _tts.isLanguageAvailable(locale);
+              if (available == false ||
+                  (available is num && available < 0)) continue;
+              final selected = await _tts.setLanguage(locale);
+              if (selected == false ||
+                  (selected is num && selected < 0)) continue;
+              final spoken = await _tts.speak(text)
+                  .timeout(const Duration(seconds: 55));
+              if (spoken == 0 || spoken == false) continue;
+              warning = 'Voz Android usada pelo motor $engine ($locale). '
+                  'Pode exigir internet dependendo da voz.';
+              return true;
+            } catch (_) {
+              try {
+                await _tts.stop();
+              } catch (_) {}
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Motores alternativos nao estao disponiveis neste aparelho.
+    }
+
+    warning = 'O motor de voz do Android nao conseguiu falar em '
+        '$languageCode. Abra Configuracoes → Preparar voz em ingles '
+        'para instalar os dados de voz sem sair procurando nos menus. '
+        'Confira tambem o volume de midia.';
+    return false;
+  }
+
+  /// Diagnostico de audio separado da traducao para o Galaxy A14.
+  Future<bool> testEnglishVoice() async {
+    if (busy || running) return false;
+    busy = true;
+    warning = null;
+    speaking = true;
+    status = 'Testando voz em ingles...';
+    _update();
+    try {
+      return await _speakWithSystemFallback(
+        'Hello! I am Zelu. Welcome to our store.', 'en',
+      );
+    } catch (error) {
+      warning = 'Teste de voz falhou: $error';
+      return false;
+    } finally {
+      speaking = false;
+      busy = false;
+      status = 'Teste de voz finalizado';
+      _update();
+    }
+  }
+
+  /// Abre o instalador de dados TTS oferecido pelo Android, quando existir.
+  /// A confirmacao e o download pertencem ao sistema operacional.
+  Future<bool> openVoiceInstaller() async {
+    if (running || busy) return false;
+    try {
+      final opened = await _speech.invokeMethod<bool>('installTtsData');
+      warning = opened == true
+          ? 'Instalador de voz aberto. Conclua a instalacao do ingles e '
+              'volte para testar a voz.'
+          : 'Este Android nao oferece instalador de voz pelo aplicativo. '
+              'Verifique o motor de sintese de fala do sistema.';
+      _update();
+      return opened == true;
+    } catch (error) {
+      warning = 'Nao foi possivel abrir o instalador de voz: $error';
+      _update();
+      return false;
     }
   }
 
@@ -775,17 +970,11 @@ class TranslationController extends ChangeNotifier {
     status = 'Tradução concluída';
     _update();
     final target = fromEnglish ? 'pt' : 'en';
-    if (audioEnabled && _voices.containsKey(target)) {
+    if (audioEnabled) {
       speaking = true;
       status = 'Reproduzindo tradução…';
       _update();
-      final voice = _voices[target]!;
-      await _tts.setLanguage(target == 'pt' ? 'pt-BR' : 'en-US');
-      await _tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
-      await _tts.speak(translation).timeout(const Duration(seconds: 60));
+      await _speakWithSystemFallback(translation, target);
     }
   }
 
@@ -796,6 +985,8 @@ class TranslationController extends ChangeNotifier {
       partial = '';
       if (text.isEmpty) return;
       original = text;
+      heardText = text;
+      heardLanguage = '';
       if (tvMode) tvRecognizedSegments++;
       if (microphoneOnly) {
         status = 'Microfone OK: fala reconhecida! Teste novamente ou encerre.';
@@ -832,8 +1023,14 @@ class TranslationController extends ChangeNotifier {
           language = await _languageId.identifyLanguage(text)
               .timeout(const Duration(seconds: 8));
         }
+        heardLanguage = language;
+        _update();
         final source = getLinguaLanguage(language);
-        final target = getLinguaLanguage(selectedTarget);
+        // Traducao bilateral: fala do cliente -> portugues;
+        // fala em portugues -> idioma selecionado do cliente.
+        final target = getLinguaLanguage(
+          source?.code == 'pt' ? selectedSource : 'pt',
+        );
         if (source == null || target == null) {
           status = 'Idioma detectado fora do catálogo; transcrição disponível.';
           _update();
@@ -937,24 +1134,13 @@ class TranslationController extends ChangeNotifier {
     status = 'Frase pronta: sem modelo de traducao';
     _update();
     try {
-      await _initializeVoices().timeout(const Duration(seconds: 15));
-      final target = inEnglish ? 'en' : 'pt';
-      final voice = _voices[target];
-      if (voice == null) {
-        warning = 'Nao existe voz $target offline instalada no celular. '
-            'O texto continua disponivel para mostrar ou copiar.';
-        return;
-      }
-      await _tts.setLanguage(inEnglish ? 'en-US' : 'pt-BR');
-      await _tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
       speaking = true;
-      status = inEnglish ? 'Falando em ingles…' : 'Falando em portugues…';
+      status = inEnglish ? 'Falando em inglês…' : 'Falando em português…';
       _update();
-      await _tts.speak(inEnglish ? phrase.en : phrase.pt)
-          .timeout(const Duration(seconds: 30));
+      await _speakWithSystemFallback(
+        inEnglish ? phrase.en : phrase.pt,
+        inEnglish ? 'en' : 'pt',
+      );
     } on TimeoutException {
       warning = 'A voz offline nao respondeu em 30 segundos.';
     } catch (e) {
@@ -963,6 +1149,81 @@ class TranslationController extends ChangeNotifier {
       speaking = false;
       busy = false;
       status = 'Pronto para iniciar';
+      _update();
+    }
+  }
+
+  /// Resposta de atendimento: sempre com microfone parado para evitar eco.
+  /// O texto em portugues e confirmado pelo atendente antes da fala.
+  /// Ingles pronto funciona mesmo sem modelos ML Kit; outros idiomas
+  /// exigem os pacotes instalados e uma voz local disponivel.
+  Future<bool> speakRetailResponse(String pt, {String? preparedEnglish}) async {
+    final input = pt.trim();
+    if (running || busy || input.isEmpty) return false;
+    final target = getLinguaLanguage(selectedSource);
+    if (target == null || target.code == 'pt') {
+      warning = 'Selecione o idioma do cliente para responder.';
+      _update();
+      return false;
+    }
+    busy = true;
+    warning = null;
+    status = 'Preparando resposta para ${target.name}…';
+    _update();
+    OnDeviceTranslator? translator;
+    try {
+      String result;
+      if (target.code == 'en' && preparedEnglish != null) {
+        result = preparedEnglish;
+      } else {
+        for (final language in [getLinguaLanguage('pt')!, target]) {
+          final available = await _models.isModelDownloaded(
+            language.translateCode.bcpCode,
+          ).timeout(const Duration(seconds: 12));
+          if (!available) {
+            warning = 'Prepare os modelos de português e ${target.name} '
+                'na Biblioteca de idiomas antes de falar uma resposta livre.';
+            status = 'Pacote de tradução ausente';
+            return false;
+          }
+        }
+        translator = OnDeviceTranslator(
+          sourceLanguage: TranslateLanguage.portuguese,
+          targetLanguage: target.translateCode,
+        );
+        result = await translator.translateText(input)
+            .timeout(const Duration(seconds: 25));
+      }
+      original = input;
+      portuguese = input;
+      english = result; // Campo da resposta, no idioma escolhido pelo cliente.
+      history.insert(0, TranslationTurn(
+        source: input, translation: result, fromEnglish: false,
+      ));
+      if (history.length > 8) history.removeRange(8, history.length);
+      status = 'Resposta traduzida para ${target.name}';
+      _update();
+
+      speaking = true;
+      status = 'Falando com o cliente em ${target.name}…';
+      _update();
+      final played = await _speakWithSystemFallback(result, target.code);
+      if (!played) {
+        // A traducao permanece na tela e pode ser mostrada ao cliente.
+        status = 'Resposta traduzida; voz indisponivel';
+      }
+      return true;
+    } on TimeoutException {
+      warning = 'A tradução ou a voz não respondeu a tempo. '
+          'Confira a resposta na tela.';
+      return false;
+    } catch (e) {
+      warning = 'Não foi possível preparar a resposta: $e';
+      return false;
+    } finally {
+      translator?.close();
+      speaking = false;
+      busy = false;
       _update();
     }
   }
@@ -1019,6 +1280,10 @@ class _TranslationPageState extends State<TranslationPage> {
   bool consent = false;
   String phraseCategory = 'Todos';
   String phraseQuery = '';
+  bool _retailMode = true;
+  bool _retailReplyBusy = false;
+  String? _retailFeedback;
+  final TextEditingController _retailInput = TextEditingController();
   final TextEditingController _textInput = TextEditingController();
   final LinguaFlowUpdater _updater = LinguaFlowUpdater();
   LinguaFlowRelease? _newVersion;
@@ -1084,6 +1349,7 @@ class _TranslationPageState extends State<TranslationPage> {
   void dispose() {
     controller.removeListener(_refresh);
     _textInput.dispose();
+    _retailInput.dispose();
     controller.dispose();
     super.dispose();
   }
@@ -1097,6 +1363,40 @@ class _TranslationPageState extends State<TranslationPage> {
       );
     } else {
       await controller.start(microphoneOnly: microphoneOnly);
+    }
+  }
+
+  Future<void> _sendRetailReply(String pt, {String? preparedEnglish}) async {
+    if (_retailReplyBusy || controller.busy) return;
+    final wasListening = controller.running;
+    setState(() {
+      _retailReplyBusy = true;
+      _retailFeedback = null;
+    });
+    try {
+      // Interromper a captura antes do TTS impede que o Whisper
+      // transcreva a propria voz do aplicativo.
+      if (wasListening) await controller.stop();
+      final translated = await controller.speakRetailResponse(
+        pt, preparedEnglish: preparedEnglish,
+      );
+      if (!translated) {
+        _retailFeedback = controller.warning ??
+            'Não foi possível traduzir a resposta.';
+      } else if (controller.warning != null) {
+        _retailFeedback = controller.warning;
+      }
+      if (wasListening && consent && mounted) {
+        await controller.start();
+        if (!controller.running) {
+          _retailFeedback = controller.warning ??
+              'Não foi possível retomar o microfone.';
+        }
+      }
+    } catch (e) {
+      _retailFeedback = 'Erro no atendimento: $e';
+    } finally {
+      if (mounted) setState(() => _retailReplyBusy = false);
     }
   }
 
@@ -1158,7 +1458,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 const SizedBox(height: 5),
                 Text(controller.tvMode
                     ? 'MODO VÍDEO / TELEVISÃO'
-                    : 'CONVERSA SEM BARREIRAS',
+                    : _retailMode ? 'ATENDIMENTO EM LOJA' : 'CONVERSA SEM BARREIRAS',
                     style: const TextStyle(fontSize: 16, letterSpacing: 0.7,
                         fontWeight: FontWeight.w900)),
                 VoiceAura(
@@ -1211,6 +1511,30 @@ class _TranslationPageState extends State<TranslationPage> {
               ]),
             ),
             const SizedBox(height: 15),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _retailMode,
+              onChanged: running || controller.busy || _retailReplyBusy
+                  ? null : (enabled) {
+                if (enabled) {
+                  controller.setTvMode(false);
+                  if (controller.selectedSource == 'pt') {
+                    controller.selectSource('en');
+                  }
+                  controller.selectTarget('pt');
+                }
+                setState(() {
+                  _retailMode = enabled;
+                  _retailFeedback = null;
+                });
+              },
+              title: const Text('Modo atendimento em loja',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Escutar o cliente, sugerir respostas '
+                  'de vendas e falar no idioma dele.'),
+              secondary: const Icon(Icons.storefront_outlined,
+                  color: Color(0xFF62F0D2)),
+            ),
             if (controller.useWhisper) SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: controller.autoDetectSpeech,
@@ -1226,8 +1550,11 @@ class _TranslationPageState extends State<TranslationPage> {
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: controller.tvMode,
-              onChanged: running || controller.busy
-                  ? null : controller.setTvMode,
+              onChanged: running || controller.busy || _retailReplyBusy
+                  ? null : (enabled) {
+                    if (enabled) setState(() => _retailMode = false);
+                    controller.setTvMode(enabled);
+                  },
               title: const Text('Modo Vídeo/TV · Inglês → Português',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
               subtitle: const Text(
@@ -1248,12 +1575,14 @@ class _TranslationPageState extends State<TranslationPage> {
               dense: true,
             ),
             FilledButton.icon(
-              onPressed: controller.busy ? null : () => _toggle(),
+              onPressed: controller.busy || _retailReplyBusy
+                  ? null : () => _toggle(),
               icon: Icon(running ? Icons.stop_circle_rounded
                   : Icons.mic_rounded, size: 23),
               label: Text(controller.busy ? 'PREPARANDO…' :
                   running ? 'ENCERRAR CONVERSA' :
-                  controller.tvMode ? 'ESCUTAR TV EM INGLÊS' : 'INICIAR CONVERSA'),
+                  controller.tvMode ? 'ESCUTAR TV EM INGLÊS' :
+                  _retailMode ? 'INICIAR ATENDIMENTO' : 'INICIAR CONVERSA'),
               style: FilledButton.styleFrom(
                 backgroundColor: running
                     ? const Color(0xFFFF869E) : accent,
@@ -1266,6 +1595,149 @@ class _TranslationPageState extends State<TranslationPage> {
                     letterSpacing: 1.1),
               ),
             ),
+            if (_retailMode) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF12243A),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFF28566A)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.storefront_rounded,
+                          color: Color(0xFF58F1D0)),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('ASSISTENTE DE VENDAS',
+                          style: TextStyle(fontWeight: FontWeight.w900))),
+                    ]),
+                    const SizedBox(height: 8),
+                    const Text('Idioma do cliente e das respostas:',
+                        style: TextStyle(color: Color(0xFFB7CCDC), fontSize: 12)),
+                    DropdownButton<String>(
+                      isExpanded: true,
+                      value: controller.selectedSource == 'pt'
+                          ? 'en' : controller.selectedSource,
+                      items: [
+                        for (final language in linguaLanguages)
+                          if (language.code != 'pt')
+                            DropdownMenuItem(
+                              value: language.code,
+                              child: Text(language.name),
+                            ),
+                      ],
+                      onChanged: running || controller.busy || _retailReplyBusy
+                          ? null : (code) {
+                            if (code != null) {
+                              controller.selectSource(code);
+                              controller.selectTarget('pt');
+                            }
+                          },
+                    ),
+                    const Text('As sugestões são frases predefinidas: '
+                        'não inventam preços, estoque ou descontos.',
+                        style: TextStyle(
+                            color: Color(0xFFB7CCDC), fontSize: 11)),
+                    const SizedBox(height: 12),
+                    Text(controller.history.isNotEmpty &&
+                            controller.history.first.fromEnglish
+                        ? 'Sugestões para a última fala do cliente'
+                        : 'Respostas rápidas para começar',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    for (final reply in suggestRetailReplies(
+                      controller.history.isNotEmpty &&
+                              controller.history.first.fromEnglish
+                          ? controller.history.first.translation
+                          : controller.original,
+                    ))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 7),
+                        child: OutlinedButton(
+                          onPressed: controller.busy || _retailReplyBusy
+                              ? null : () => _sendRetailReply(
+                                  reply.pt, preparedEnglish: reply.en),
+                          style: OutlinedButton.styleFrom(
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 12),
+                            side: const BorderSide(color: Color(0xFF326070)),
+                          ),
+                          child: Row(children: [
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(reply.pt, style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(controller.selectedSource == 'en'
+                                    ? reply.en
+                                    : 'Traduzir para ${getLinguaLanguage(controller.selectedSource)?.name ?? 'idioma selecionado'}',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Color(0xFFB6C7D6))),
+                              ],
+                            )),
+                            const Icon(Icons.volume_up_rounded,
+                                color: Color(0xFF58F1D0)),
+                          ]),
+                        ),
+                      ),
+                    const SizedBox(height: 9),
+                    TextField(
+                      controller: _retailInput,
+                      maxLines: 3,
+                      minLines: 1,
+                      decoration: const InputDecoration(
+                        labelText: 'Sua resposta em português',
+                        hintText: 'Ex.: Vou verificar esse produto para você.',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.edit_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: controller.busy || _retailReplyBusy
+                          ? null : () {
+                            final text = _retailInput.text.trim();
+                            if (text.isNotEmpty) _sendRetailReply(text);
+                          },
+                      icon: const Icon(Icons.translate_rounded),
+                      label: Text(_retailReplyBusy
+                          ? 'AGUARDE…' : 'TRADUZIR E FALAR'),
+                    ),
+                    if (_retailFeedback != null) ...[
+                      const SizedBox(height: 7),
+                      Text(_retailFeedback!,
+                          style: const TextStyle(
+                              color: Color(0xFFFFCF91), fontSize: 12)),
+                    ],
+                    const SizedBox(height: 8),
+                    const Text('Ao responder, o microfone pausa para evitar eco '
+                        'e tenta retomar a escuta automaticamente. '
+                        'Voz offline depende das vozes instaladas no Android; '
+                        'o texto traduzido continua visível.',
+                        style: TextStyle(
+                            color: Color(0xFF91ABBE), fontSize: 11)),
+                    if (!running && !controller.busy) ...[
+                      TextButton.icon(
+                        onPressed: controller.prepareModels,
+                        icon: const Icon(Icons.download_rounded),
+                        label: const Text('Preparar tradução inglês/português'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _toggle(microphoneOnly: true),
+                        icon: const Icon(Icons.hearing_rounded),
+                        label: const Text('Testar microfone sem tradução'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(children: [
               const Icon(Icons.memory_rounded, size: 15,
@@ -1288,6 +1760,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 content: controller.deviceNotice!,
               ),
             ],
+            if (kReleaseMode) ...[
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(11),
@@ -1338,6 +1811,7 @@ class _TranslationPageState extends State<TranslationPage> {
                 ],
               ),
             ),
+            ],
             const SizedBox(height: 22),
             const Row(children: [
               Icon(Icons.subtitles_rounded,
@@ -1357,7 +1831,7 @@ class _TranslationPageState extends State<TranslationPage> {
             ),
             const SizedBox(height: 12),
             _TranslationCard(
-              heading: '🇧🇷 Português → Inglês',
+              heading: '🇧🇷 Português → ${getLinguaLanguage(controller.selectedSource)?.name ?? 'Inglês'}',
               subtitle: 'Sua resposta traduzida',
               translated: controller.english,
               placeholder: 'Sua resposta aparecerá aqui…',

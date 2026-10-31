@@ -1,6 +1,6 @@
 name: linguaflow_ai
 publish_to: none
-description: Tradutor bilateral sem API paga, com reconhecimento e tradução no dispositivo Android.
+description: Zeluvori AI - tradutor bilateral com mascote animado e reconhecimento local no Android.
 version: 0.9.0+9
 
 environment:
