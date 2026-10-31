@@ -815,6 +815,54 @@ class TranslationController extends ChangeNotifier {
         } catch (_) {}
       }
     }
+    // Alguns Galaxy usam Samsung TTS como padrao, mas tambem possuem
+    // Speech Services by Google. Tentar os motores instalados no app,
+    // sem alterar a preferencia global do telefone.
+    try {
+      final availableEngines = await _tts.getEngines;
+      if (availableEngines is List) {
+        final engines = availableEngines
+            .map((engine) => engine.toString())
+            .where((engine) => engine.isNotEmpty)
+            .toList();
+        engines.sort((a, b) {
+          final aGoogle = a.toLowerCase().contains('google') ? 0 : 1;
+          final bGoogle = b.toLowerCase().contains('google') ? 0 : 1;
+          return aGoogle.compareTo(bGoogle);
+        });
+        for (final engine in engines.take(3)) {
+          try {
+            await _tts.setEngine(engine);
+            await _tts.awaitSpeakCompletion(true);
+          } catch (_) {
+            continue;
+          }
+          for (final locale in _ttsLocales[languageCode] ?? [languageCode]) {
+            try {
+              final available = await _tts.isLanguageAvailable(locale);
+              if (available == false ||
+                  (available is num && available < 0)) continue;
+              final selected = await _tts.setLanguage(locale);
+              if (selected == false ||
+                  (selected is num && selected < 0)) continue;
+              final spoken = await _tts.speak(text)
+                  .timeout(const Duration(seconds: 55));
+              if (spoken == 0 || spoken == false) continue;
+              warning = 'Voz Android usada pelo motor $engine ($locale). '
+                  'Pode exigir internet dependendo da voz.';
+              return true;
+            } catch (_) {
+              try {
+                await _tts.stop();
+              } catch (_) {}
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Motores alternativos nao estao disponiveis neste aparelho.
+    }
+
     warning = 'O motor de voz do Android nao conseguiu falar em '
         '$languageCode. Abra Configuracoes → Preparar voz em ingles '
         'para instalar os dados de voz sem sair procurando nos menus. '
