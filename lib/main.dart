@@ -110,6 +110,9 @@ class TranslationController extends ChangeNotifier {
   String portuguese = '';
   String english = '';
   String original = '';
+  // Ultima fala reconhecida, mesmo quando falta o modelo de traducao.
+  String heardText = '';
+  String heardLanguage = '';
   String? warning;
 
   void _update() {
@@ -802,6 +805,8 @@ class TranslationController extends ChangeNotifier {
       partial = '';
       if (text.isEmpty) return;
       original = text;
+      heardText = text;
+      heardLanguage = '';
       if (tvMode) tvRecognizedSegments++;
       if (microphoneOnly) {
         status = 'Microfone OK: fala reconhecida! Teste novamente ou encerre.';
@@ -838,6 +843,8 @@ class TranslationController extends ChangeNotifier {
           language = await _languageId.identifyLanguage(text)
               .timeout(const Duration(seconds: 8));
         }
+        heardLanguage = language;
+        _update();
         final source = getLinguaLanguage(language);
         // Traducao bilateral: fala do cliente -> portugues;
         // fala em portugues -> idioma selecionado do cliente.
