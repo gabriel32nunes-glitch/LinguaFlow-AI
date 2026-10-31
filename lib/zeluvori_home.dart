@@ -18,6 +18,9 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
   ShopVisualItem? _activeVisual;
   String? _lastVisualTrigger;
   String? _dismissedVisualId;
+  String _seenPartial = '';
+  String _seenHeard = '';
+  String _seenHistory = '';
 
   @override
   void initState() {
@@ -30,15 +33,26 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
 
   void _refresh() {
     if (!mounted) return;
-    // A legenda parcial aciona o modelo imediatamente; a fala final
-    // e as respostas digitadas tambem funcionam sem rede.
-    final spoken = <String>[
-      controller.partial,
-      controller.heardText,
-      if (controller.history.isNotEmpty) controller.history.first.source,
-      controller.original,
-    ];
-    for (final phrase in spoken) {
+    // Processar apenas textos NOVOS: uma fala antiga nao pode substituir
+    // o objeto atual quando a legenda parcial some ou muda.
+    final changed = <String>[];
+    final partial = controller.partial.trim();
+    final heard = controller.heardText.trim();
+    final history = controller.history.isNotEmpty
+        ? controller.history.first.source.trim() : '';
+    if (partial != _seenPartial) {
+      _seenPartial = partial;
+      if (partial.isNotEmpty) changed.add(partial);
+    }
+    if (heard != _seenHeard) {
+      _seenHeard = heard;
+      if (heard.isNotEmpty) changed.add(heard);
+    }
+    if (history != _seenHistory) {
+      _seenHistory = history;
+      if (history.isNotEmpty) changed.add(history);
+    }
+    for (final phrase in changed.reversed) {
       final item = ShopVisualCatalog.detect(phrase);
       if (item == null) continue;
       final trigger = item.id + ':' + ShopVisualCatalog.normalize(phrase);
