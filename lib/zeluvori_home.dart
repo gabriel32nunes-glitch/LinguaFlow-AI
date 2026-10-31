@@ -206,6 +206,42 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                   unawaited(controller.prepareModels());
                 },
               ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.volume_up_rounded,
+                    color: Color(0xFF48D8FF)),
+                title: const Text('Testar voz em inglês'),
+                subtitle: const Text(
+                    'Zelu diz uma frase para conferir o áudio.'),
+                enabled: !controller.running && !controller.busy,
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final ok = await controller.testEnglishVoice();
+                  if (mounted) {
+                    setState(() {
+                      _feedback = controller.warning ??
+                          (ok ? 'Teste de voz concluído.' :
+                              'Não foi possível reproduzir a voz.');
+                    });
+                  }
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.download_rounded,
+                    color: Color(0xFF48D8FF)),
+                title: const Text('Preparar voz em inglês'),
+                subtitle: const Text(
+                    'Abre o instalador de vozes do Android, quando disponível.'),
+                enabled: !controller.running && !controller.busy,
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await controller.openVoiceInstaller();
+                  if (mounted) {
+                    setState(() => _feedback = controller.warning);
+                  }
+                },
+              ),
               Text(controller.packFeedback,
                   style: const TextStyle(
                       fontSize: 12, color: Color(0xFF9FB7D3))),
@@ -339,7 +375,7 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
         ? customer.translation : null;
     final statusActive = controller.running || controller.speaking;
     final small = MediaQuery.sizeOf(context).height < 740;
-    final mascotHeight = small ? 192.0 : 244.0;
+    final mascotHeight = small ? 216.0 : 264.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFF050C1A),
