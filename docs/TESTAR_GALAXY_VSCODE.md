@@ -87,6 +87,38 @@ O novo mascote Zelu e desenhado em Flutter, com viseira preta brilhante,
 olhos sorridentes, fones de neon, antena e mao com dedos. Toque nele para
 fazê-lo acenar; durante a fala a boquinha se move.
 
+## Vitrine 3D automatica (nove objetos)
+
+O Zeluvori agora identifica palavras da fala transcrita (inclusive parciais)
+e mostra um modelo 3D com pontos de luz azul/ciano/roxo. Nao usa internet,
+camera, WebView nem modelo generativo; os nove modelos sao feitos em geometria
+leve no Flutter para o Galaxy A14.
+
+- **Camiseta**: camiseta, camisa, shirt, t-shirt
+- **Calca**: calca, jeans, pants, trousers
+- **Bone**: bone, cap, hat
+- **Mochila**: mochila, backpack
+- **Pacote**: caixa, pacote, encomenda, package, box
+- **Cartao**: cartao, card, credit card
+- **Medidas**: tamanho, medidas, measure, size, ruler
+- **Desconto**: desconto, promocao, discount, sale
+- **Preco**: preco, price, etiqueta, how much
+
+Ao ouvir "Qual o preco dessa camiseta?", o aplicativo mostra a camiseta
+(prioriza produtos sobre palavras genericas como preco e tamanho).
+
+Quando um objeto e detectado, ele substitui temporariamente o Zelu no painel
+central, sem interromper a traducao. Arraste o dedo para girar o modelo,
+toque duas vezes para centralizar e toque no icone de tela cheia para mostrar
+ao cliente. O botao **Vitrine 3D** no topo abre os nove modelos manualmente.
+O **X** volta ao Zelu.
+
+**Limites**: estes sao objetos 3D estilizados (silhuetas extrudadas, faces e
+perspectiva), nao copias 3D fotograficas ou arquivos GLB das imagens. O
+reconhecimento e por palavras do texto transcrito, nao por visao computacional;
+pode haver ambiguidade ou erros de transcricao. Nao inventa cores, precos,
+estoque ou marca. Se a fala nao for reconhecida, escolha manualmente.
+
 ## 6. Quando houver bug
 
 Deixe `flutter run` aberto e copie as linhas do erro do terminal. Informe o que falou, qual idioma selecionou, o que apareceu na tela e qual resposta esperava. Envie esse trecho aqui para corrigirmos o código.
