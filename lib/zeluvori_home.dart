@@ -224,7 +224,12 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
       showDragHandle: true,
       isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.78,
+          ),
+          child: SingleChildScrollView(
+            child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -259,6 +264,8 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                 ],
               ),
             ],
+          ),
+            ),
           ),
         ),
       ),
