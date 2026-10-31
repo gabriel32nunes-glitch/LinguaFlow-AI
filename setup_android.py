@@ -22,7 +22,7 @@ debug_manifest.parent.mkdir(parents=True, exist_ok=True)
 debug_manifest.write_text(
     '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
     'xmlns:tools="http://schemas.android.com/tools">\n'
-    '    <application android:label="LinguaFlow DEV" tools:replace="android:label" />\n'
+    '    <application android:label="Zeluvori DEV" tools:replace="android:label" />\n'
     '</manifest>\n',
     encoding='utf-8',
 )
@@ -121,6 +121,6 @@ for old in (android / 'app/src/main/kotlin').rglob('MainActivity.kt'):
     if 'class MainActivity: FlutterActivity()' in content and len(content) < 300:
         old.unlink()
 
-print('Android configurado: SDK 31+ (recursos automáticos 34+), MainActivity e permissões.')
+print('Zeluvori configurado: SDK 31+ (recursos automáticos 34+), MainActivity e permissoes.')
 print('Execute: flutter pub get')
 print('Depois: flutter run')
