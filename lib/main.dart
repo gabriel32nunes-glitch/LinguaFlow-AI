@@ -702,30 +702,166 @@ class TranslationController extends ChangeNotifier {
     }
   }
 
+  /// TTS: tenta primeiro voz local; se o Android nao marcar nenhuma voz
+  /// como offline, tenta o sintetizador padrao do aparelho.
+  /// O segundo caminho pode precisar de internet, mas nao usa API paga do app.
   Future<void> _initializeVoices() async {
-    // Apenas vozes explicitamente declaradas offline pelo mecanismo Android.
     await _tts.awaitSpeakCompletion(true);
-    await _tts.setSpeechRate(0.49);
-    final allVoices = await _tts.getVoices;
+    await _tts.setSpeechRate(0.48);
+    await _tts.setPitch(1.07);
+    await _tts.setVolume(1.0);
     _voices.clear();
-    if (allVoices is List) {
-      for (final item in allVoices) {
-        if (item is! Map) continue;
-        final voice = item.map((key, value) => MapEntry(key.toString(), value));
-        final locale = voice['locale']?.toString().replaceAll('_', '-').toLowerCase() ?? '';
-        final local = voice['network_required'] == false ||
-            voice['network_required']?.toString().toLowerCase() == 'false';
-        if (local && voice['name'] != null) {
+    try {
+      final allVoices = await _tts.getVoices;
+      if (allVoices is List) {
+        for (final item in allVoices) {
+          if (item is! Map) continue;
+          final voice = item.map(
+              (key, value) => MapEntry(key.toString(), value));
+          final locale = voice['locale']?.toString()
+                  .replaceAll('_', '-').toLowerCase() ?? '';
+          final networkFlag = voice['network_required'] ??
+              voice['networkRequired'] ??
+              voice['requiresNetworkConnection'];
+          final local = networkFlag == false ||
+              networkFlag?.toString().toLowerCase() == 'false';
           final language = getLinguaLanguage(locale);
-          if (language != null) {
+          if (local && language != null && voice['name'] != null) {
             _voices.putIfAbsent(language.code, () => voice);
           }
         }
       }
+    } catch (_) {
+      // Alguns motores Android nao enumeram as vozes. Ainda assim podem
+      // falar com setLanguage + speak; nao bloquear o usuario.
     }
-    if (_voices.length < 2) {
-      warning = 'Uma voz offline PT/EN não foi encontrada. As legendas continuam disponíveis. '
-          'Instale vozes offline nas opções de texto para fala do Android.';
+  }
+
+  static const Map<String, List<String>> _ttsLocales = {
+    'en': ['en-US', 'en-GB', 'en-AU'],
+    'pt': ['pt-BR', 'pt-PT'],
+    'es': ['es-ES', 'es-MX'],
+    'fr': ['fr-FR', 'fr-CA'],
+    'zh': ['zh-CN', 'zh-TW'],
+    'hi': ['hi-IN'],
+    'ar': ['ar-SA'],
+    'bn': ['bn-BD'],
+    'id': ['id-ID'],
+    'ur': ['ur-PK'],
+  };
+
+  /// Retorna true apenas quando o sintetizador informa que terminou a fala.
+  /// Se a voz offline nao existir, tenta o TTS padrao do Android.
+  Future<bool> _speakWithSystemFallback(
+    String text, String languageCode,
+  ) async {
+    if (text.trim().isEmpty) return false;
+    await _initializeVoices().timeout(const Duration(seconds: 15));
+    final offline = _voices[languageCode];
+    final attempts = <String>[];
+    if (offline != null) {
+      final locale = offline['locale'].toString().replaceAll('_', '-');
+      try {
+        final setResult = await _tts.setLanguage(locale);
+        if (setResult is num && setResult < 0) {
+          throw StateError('Idioma $locale nao disponivel');
+        }
+        await _tts.setVoice({
+          'name': offline['name'].toString(),
+          'locale': offline['locale'].toString(),
+        });
+        final spoken = await _tts.speak(text)
+            .timeout(const Duration(seconds: 55));
+        if (spoken != 0 && spoken != false) {
+          warning = null;
+          return true;
+        }
+        attempts.add('Voz offline $locale nao reproduziu.');
+      } catch (error) {
+        attempts.add('Voz offline: $error');
+        try {
+          await _tts.stop();
+        } catch (_) {}
+      }
+    }
+
+    // Usar setLanguage SEM setVoice permite que o Android escolha a
+    // propria voz, inclusive quando o plugin nao a marca como offline.
+    for (final locale in _ttsLocales[languageCode] ?? [languageCode]) {
+      try {
+        final available = await _tts.isLanguageAvailable(locale);
+        if (available == false ||
+            (available is num && available < 0)) {
+          continue;
+        }
+        final selected = await _tts.setLanguage(locale);
+        if (selected == false ||
+            (selected is num && selected < 0)) {
+          continue;
+        }
+        final spoken = await _tts.speak(text)
+            .timeout(const Duration(seconds: 55));
+        if (spoken == 0 || spoken == false) {
+          attempts.add('Motor Android recusou $locale.');
+          continue;
+        }
+        warning = 'Voz do sistema Android utilizada ($locale). '
+            'Dependendo do motor de voz, a reproducao pode usar internet.';
+        return true;
+      } catch (error) {
+        attempts.add('$locale: $error');
+        try {
+          await _tts.stop();
+        } catch (_) {}
+      }
+    }
+    warning = 'O motor de voz do Android nao conseguiu falar em '
+        '$languageCode. Abra Configuracoes → Preparar voz em ingles '
+        'para instalar os dados de voz sem sair procurando nos menus. '
+        'Confira tambem o volume de midia.';
+    return false;
+  }
+
+  /// Diagnostico de audio separado da traducao para o Galaxy A14.
+  Future<bool> testEnglishVoice() async {
+    if (busy || running) return false;
+    busy = true;
+    warning = null;
+    speaking = true;
+    status = 'Testando voz em ingles...';
+    _update();
+    try {
+      return await _speakWithSystemFallback(
+        'Hello! I am Zelu. Welcome to our store.', 'en',
+      );
+    } catch (error) {
+      warning = 'Teste de voz falhou: $error';
+      return false;
+    } finally {
+      speaking = false;
+      busy = false;
+      status = 'Teste de voz finalizado';
+      _update();
+    }
+  }
+
+  /// Abre o instalador de dados TTS oferecido pelo Android, quando existir.
+  /// A confirmacao e o download pertencem ao sistema operacional.
+  Future<bool> openVoiceInstaller() async {
+    if (running || busy) return false;
+    try {
+      final opened = await _speech.invokeMethod<bool>('installTtsData');
+      warning = opened == true
+          ? 'Instalador de voz aberto. Conclua a instalacao do ingles e '
+              'volte para testar a voz.'
+          : 'Este Android nao oferece instalador de voz pelo aplicativo. '
+              'Verifique o motor de sintese de fala do sistema.';
+      _update();
+      return opened == true;
+    } catch (error) {
+      warning = 'Nao foi possivel abrir o instalador de voz: $error';
+      _update();
+      return false;
     }
   }
 
@@ -785,17 +921,11 @@ class TranslationController extends ChangeNotifier {
     status = 'Tradução concluída';
     _update();
     final target = fromEnglish ? 'pt' : 'en';
-    if (audioEnabled && _voices.containsKey(target)) {
+    if (audioEnabled) {
       speaking = true;
       status = 'Reproduzindo tradução…';
       _update();
-      final voice = _voices[target]!;
-      await _tts.setLanguage(target == 'pt' ? 'pt-BR' : 'en-US');
-      await _tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
-      await _tts.speak(translation).timeout(const Duration(seconds: 60));
+      await _speakWithSystemFallback(translation, target);
     }
   }
 
@@ -955,24 +1085,13 @@ class TranslationController extends ChangeNotifier {
     status = 'Frase pronta: sem modelo de traducao';
     _update();
     try {
-      await _initializeVoices().timeout(const Duration(seconds: 15));
-      final target = inEnglish ? 'en' : 'pt';
-      final voice = _voices[target];
-      if (voice == null) {
-        warning = 'Nao existe voz $target offline instalada no celular. '
-            'O texto continua disponivel para mostrar ou copiar.';
-        return;
-      }
-      await _tts.setLanguage(inEnglish ? 'en-US' : 'pt-BR');
-      await _tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
       speaking = true;
-      status = inEnglish ? 'Falando em ingles…' : 'Falando em portugues…';
+      status = inEnglish ? 'Falando em inglês…' : 'Falando em português…';
       _update();
-      await _tts.speak(inEnglish ? phrase.en : phrase.pt)
-          .timeout(const Duration(seconds: 30));
+      await _speakWithSystemFallback(
+        inEnglish ? phrase.en : phrase.pt,
+        inEnglish ? 'en' : 'pt',
+      );
     } on TimeoutException {
       warning = 'A voz offline nao respondeu em 30 segundos.';
     } catch (e) {
@@ -1036,12 +1155,15 @@ class TranslationController extends ChangeNotifier {
       status = 'Resposta traduzida para ${target.name}';
       _update();
 
-      await _initializeVoices().timeout(const Duration(seconds: 15));
-      final voice = _voices[target.code];
-      if (voice == null) {
-        warning = 'Resposta traduzida, mas não há voz offline '
-            'de ${target.name} no celular. Mostre o texto ao cliente.';
-        return true;
+      speaking = true;
+      status = 'Falando com o cliente em ${target.name}…';
+      _update();
+      final played = await _speakWithSystemFallback(result, target.code);
+      if (!played) {
+        // A traducao permanece na tela e pode ser mostrada ao cliente.
+        status = 'Resposta traduzida; voz indisponivel';
+      }
+      return true;
       }
       warning = null;
       speaking = true;
