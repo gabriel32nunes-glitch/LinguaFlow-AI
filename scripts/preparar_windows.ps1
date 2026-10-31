@@ -1,4 +1,4 @@
-# LinguaFlow AI - preparacao local para Windows + Galaxy A14.
+# Zeluvori AI - preparacao local para Windows + Galaxy A14.
 # Execute na pasta raiz do repositorio no PowerShell do VS Code.
 $ErrorActionPreference = "Stop"
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
@@ -69,5 +69,5 @@ Write-Host "PREPARACAO CONCLUIDA!" -ForegroundColor Green
 Write-Host "Conecte o Galaxy com Depuracao USB e autorize o computador."
 Write-Host "Execute: flutter devices"
 Write-Host "Depois:  flutter run"
-Write-Host "O aplicativo 'LinguaFlow DEV' instala ao lado do LinguaFlow oficial."
+Write-Host "O aplicativo 'Zeluvori DEV' instala ao lado do Zeluvori oficial."
 Write-Host "Para Hot Reload, pressione 'r' no terminal do flutter run."
