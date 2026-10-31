@@ -266,6 +266,10 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
   }
 
   void _openVisualFullscreen(ShopVisualItem item) {
+    final reply = _lastReply;
+    final translatedReply = reply != null &&
+            ShopVisualCatalog.detect(reply.source)?.id == item.id
+        ? reply.translation : null;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => Dialog.fullscreen(
@@ -307,6 +311,29 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                             color: Color(0xFF93B6D5), fontSize: 13)),
+                    if (translatedReply != null) ...[
+                      const SizedBox(height: 11),
+                      const Text('EXPLICAÇÃO TRADUZIDA',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF47DDFF),
+                              letterSpacing: 1.2,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 5),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 100),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            translatedReply,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 13),
                     const Text(
                       'ARRASTE PARA GIRAR · TOQUE DUAS VEZES PARA CENTRALIZAR',
