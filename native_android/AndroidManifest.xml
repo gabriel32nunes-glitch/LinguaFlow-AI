@@ -7,7 +7,7 @@
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
     <application
-        android:label="LinguaFlow AI Grátis"
+        android:label="Zeluvori AI"
         android:name="${applicationName}">
         <activity
             android:name=".MainActivity"
