@@ -18,6 +18,7 @@ import 'local_whisper_voice.dart';
 import 'update_service.dart';
 
 part 'zeluvori_home.dart';
+part 'zelu_mascot.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
