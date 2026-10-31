@@ -1212,19 +1212,6 @@ class TranslationController extends ChangeNotifier {
         status = 'Resposta traduzida; voz indisponivel';
       }
       return true;
-      }
-      warning = null;
-      speaking = true;
-      status = 'Falando com o cliente em ${target.name}…';
-      _update();
-      final locale = voice['locale'].toString().replaceAll('_', '-');
-      await _tts.setLanguage(locale);
-      await _tts.setVoice({
-        'name': voice['name'].toString(),
-        'locale': voice['locale'].toString(),
-      });
-      await _tts.speak(result).timeout(const Duration(seconds: 45));
-      return true;
     } on TimeoutException {
       warning = 'A tradução ou a voz não respondeu a tempo. '
           'Confira a resposta na tela.';
