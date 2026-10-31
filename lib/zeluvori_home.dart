@@ -20,8 +20,8 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
   void initState() {
     super.initState();
     controller.addListener(_refresh);
-    controller.setAutoDetectSpeech(true);
-    controller.setAudioEnabled(false); // Evita que o Whisper escute o TTS.
+    // O controlador ja inicia com detecao automatica e audio automatico
+    // desligado para impedir eco no microfone.
     unawaited(controller.inspectDevice());
   }
 
