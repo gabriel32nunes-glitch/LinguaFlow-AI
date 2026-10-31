@@ -23,5 +23,15 @@ void main() {
     expect(find.text('INICIAR'), findsOneWidget);
     expect(find.byType(ZeluvoriMascot), findsOneWidget);
     expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
+
+    // O personagem reage ao toque e continua pintando sem excecao.
+    await tester.tap(find.byType(ZeluvoriMascot));
+    await tester.pump(const Duration(milliseconds: 130));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Configurações'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Testar voz em inglês'), findsOneWidget);
+    expect(find.text('Preparar voz em inglês'), findsOneWidget);
   });
 }
