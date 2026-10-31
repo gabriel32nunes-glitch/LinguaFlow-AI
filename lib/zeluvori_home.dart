@@ -15,6 +15,9 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
   bool _microphoneConsent = false;
   bool _replyBusy = false;
   String? _feedback;
+  ShopVisualItem? _activeVisual;
+  String? _lastVisualTrigger;
+  String? _dismissedVisualId;
 
   @override
   void initState() {
@@ -26,7 +29,27 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
   }
 
   void _refresh() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // A legenda parcial aciona o modelo imediatamente; a fala final
+    // e as respostas digitadas tambem funcionam sem rede.
+    final spoken = <String>[
+      controller.partial,
+      controller.heardText,
+      if (controller.history.isNotEmpty) controller.history.first.source,
+      controller.original,
+    ];
+    for (final phrase in spoken) {
+      final item = ShopVisualCatalog.detect(phrase);
+      if (item == null) continue;
+      final trigger = item.id + ':' + ShopVisualCatalog.normalize(phrase);
+      if (trigger != _lastVisualTrigger &&
+          item.id != _dismissedVisualId) {
+        _activeVisual = item;
+        _lastVisualTrigger = trigger;
+      }
+      break;
+    }
+    setState(() {});
   }
 
   @override
@@ -169,6 +192,128 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                             Navigator.pop(sheetContext);
                           },
                         ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _selectVisual(ShopVisualItem item) {
+    setState(() {
+      _activeVisual = item;
+      _dismissedVisualId = null;
+      _lastVisualTrigger = 'manual:' + item.id;
+    });
+  }
+
+  void _closeVisual() {
+    setState(() {
+      _dismissedVisualId = _activeVisual?.id;
+      _activeVisual = null;
+    });
+  }
+
+  void _openVisualGallery() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0B1830),
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('VITRINE 3D',
+                  style: TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w900)),
+              const SizedBox(height: 7),
+              const Text(
+                'Os objetos aparecem automaticamente quando '
+                'você ou o cliente mencionam um produto. '
+                'Você também pode escolher um modelo.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF9FB7D3),fontSize: 12),
+              ),
+              const SizedBox(height: 17),
+              Wrap(
+                spacing: 8,
+                runSpacing: 9,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (final item in ShopVisualCatalog.items)
+                    ActionChip(
+                      avatar: const Icon(Icons.view_in_ar_rounded,
+                          size: 18, color: Color(0xFF42D9FF)),
+                      label: Text(item.title),
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        _selectVisual(item);
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openVisualFullscreen(ShopVisualItem item) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF040A19),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.view_in_ar_rounded,
+                        color: Color(0xFF42D9FF)),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(item.title.toUpperCase() + ' · 3D',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2)),
+                    ),
+                    IconButton(
+                      tooltip: 'Fechar modelo 3D',
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(child: ShopVisual3D(item: item)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                child: Column(
+                  children: [
+                    Text(item.english,
+                        style: const TextStyle(fontSize: 22,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(item.description,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Color(0xFF93B6D5), fontSize: 13)),
+                    const SizedBox(height: 13),
+                    const Text(
+                      'ARRASTE PARA GIRAR · TOQUE DUAS VEZES PARA CENTRALIZAR',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: Color(0xFF47DDFF), fontSize: 10),
+                    ),
                   ],
                 ),
               ),
@@ -473,6 +618,12 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Vitrine 3D',
+                    onPressed: _openVisualGallery,
+                    icon: const Icon(Icons.view_in_ar_rounded,
+                        color: Color(0xFF47DDFF)),
+                  ),
+                  IconButton(
                     tooltip: 'Configurações',
                     onPressed: _openSettings,
                     icon: const Icon(Icons.tune_rounded,
@@ -518,10 +669,79 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                     SizedBox(
                       height: mascotHeight,
                       width: double.infinity,
-                      child: ZeluvoriMascot(
-                        listening: controller.running,
-                        speaking: controller.speaking,
-                        hasSpeech: lastText.isNotEmpty,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 360),
+                        child: _activeVisual == null
+                            ? ZeluvoriMascot(
+                                key: const ValueKey('zelu'),
+                                listening: controller.running,
+                                speaking: controller.speaking,
+                                hasSpeech: lastText.isNotEmpty,
+                              )
+                            : Stack(
+                                key: ValueKey('visual-' + _activeVisual!.id),
+                                children: [
+                                  Positioned.fill(
+                                    child: ShopVisual3D(
+                                      key: ValueKey(_activeVisual!.id),
+                                      item: _activeVisual!,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 0,
+                                    left: 2,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(_activeVisual!.title.toUpperCase(),
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w900,
+                                              color: Color(0xFF47DDFF),
+                                              letterSpacing: 1.1,
+                                            )),
+                                        const Text('OBJETO 3D · AO VIVO',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              color: Color(0xFF91AFCC),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: IconButton(
+                                      tooltip: 'Fechar objeto 3D',
+                                      onPressed: _closeVisual,
+                                      icon: const Icon(Icons.close_rounded,
+                                          color: Color(0xFFBDD5EC)),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    bottom: 1,
+                                    left: 2,
+                                    child: const Text('ARRASTE PARA GIRAR',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: Color(0xFF8AB8D7),
+                                          letterSpacing: 1.1,
+                                        )),
+                                  ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: IconButton(
+                                      tooltip: 'Ampliar modelo 3D',
+                                      onPressed: () => _openVisualFullscreen(
+                                          _activeVisual!),
+                                      icon: const Icon(
+                                          Icons.fullscreen_rounded,
+                                          color: Color(0xFF47DDFF)),
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
                     AnimatedContainer(
