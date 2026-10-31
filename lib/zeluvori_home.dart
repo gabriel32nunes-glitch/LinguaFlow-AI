@@ -351,6 +351,64 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
     );
   }
 
+  void _showCustomerText(String message) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF050C1A),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(25),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('MOSTRAR AO CLIENTE',
+                          style: TextStyle(
+                              color: Color(0xFF47DDFF),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.2)),
+                    ),
+                    IconButton(
+                      tooltip: 'Fechar',
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 32,
+                          height: 1.3,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const Text(
+                  'Mostre esta mensagem ao cliente caso a voz '
+                  'nao esteja disponivel.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12, color: Color(0xFF91B2D0)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String get _stateLabel {
     if (controller.speaking) return 'FALANDO COM O CLIENTE';
     if (_replyBusy || controller.busy) return 'PROCESSANDO...';
@@ -522,6 +580,32 @@ class _ZeluvoriHomeState extends State<ZeluvoriHome> {
                         symbol: '🔊',
                         text: reply.translation,
                         highlighted: false,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          children: [
+                            TextButton.icon(
+                              onPressed: _replyBusy
+                                  ? null
+                                  : () => _showCustomerText(reply.translation),
+                              icon: const Icon(Icons.fullscreen_rounded),
+                              label: const Text('MOSTRAR AO CLIENTE'),
+                            ),
+                            TextButton.icon(
+                              onPressed: _replyBusy
+                                  ? null
+                                  : () => unawaited(_sendReply(
+                                        reply.source,
+                                        preparedEnglish: reply.translation,
+                                      )),
+                              icon: const Icon(Icons.volume_up_rounded),
+                              label: const Text('TENTAR VOZ'),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                     if (controller.warning != null || _feedback != null) ...[
