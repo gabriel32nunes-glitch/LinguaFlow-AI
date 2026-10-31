@@ -68,6 +68,25 @@ Alterações em código nativo, plugins ou configurações Android podem exigir 
 
 O mascote é animado por código Flutter, sem depender de uma imagem. A fala TTS depende de voz offline do Android. As sugestões são predefinidas, não uma IA generativa.
 
+## Voz em inglês no Galaxy A14 (Zelu 2.0)
+
+O Zeluvori tenta primeiro uma voz offline identificada pelo Android. Se nao houver
+uma voz marcada como offline, tenta o sintetizador padrao do celular, que pode
+usar internet dependendo do motor. Isso nao usa uma API paga do Zeluvori.
+
+1. Abra **Configurações** (ícone de ajustes) e toque **Testar voz em inglês**.
+2. Se ouvir "Hello! I am Zelu...", a voz do Android esta pronta.
+3. Se nao ouvir, aumente o **volume de mídia** do Galaxy e tente novamente.
+4. Se continuar sem som, toque **Preparar voz em inglês**. Se o Android oferecer
+   um instalador de dados TTS, conclua a instalacao e volte ao app.
+5. Se o Samsung nao disponibilizar instalador/voz, o aplicativo ainda mostra
+   a mensagem em tela cheia em **MOSTRAR AO CLIENTE**. Nenhum app pode garantir
+   sintese offline em ingles sem um modelo de voz instalado ou embutido.
+
+O novo mascote Zelu e desenhado em Flutter, com viseira preta brilhante,
+olhos sorridentes, fones de neon, antena e mao com dedos. Toque nele para
+fazê-lo acenar; durante a fala a boquinha se move.
+
 ## 6. Quando houver bug
 
 Deixe `flutter run` aberto e copie as linhas do erro do terminal. Informe o que falou, qual idioma selecionou, o que apareceu na tela e qual resposta esperava. Envie esse trecho aqui para corrigirmos o código.
